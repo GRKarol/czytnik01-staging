@@ -348,6 +348,15 @@ void AudioRecorder::deinitI2s() {
 bool AudioRecorder::configureCodecForRecording() {
     uint8_t reg = 0;
 
+    // Noise-immunity warm-up, same as configureCodecForPlayback(). Espressif's
+    // own ES8311 driver writes this reg44 value twice before touching
+    // anything else and comments why: "occasional failures during the first
+    // I2C write with the ES8311 chip". This function resets the codec next,
+    // which is exactly the kind of fresh-after-reset state that write is meant
+    // to stabilize — recording was the one path skipping it, unlike playback.
+    if (!writeCodecRegister(kEs8311GpioReg44, 0x08)) return false;
+    if (!writeCodecRegister(kEs8311GpioReg44, 0x08)) return false;
+
     // Reset codec
     if (!writeCodecRegister(kEs8311ResetReg, 0x80)) return false;
     delay(5);

@@ -53,17 +53,47 @@ void setup() {
   delay(20);
 
   if (!pwrButtonHeld) {
-    // Booted without PWR being pressed - the USB cable was plugged in just
-    // to charge. Don't light up the reader; drop straight back into the
-    // same deep-sleep "off" state a normal power-off uses, and wait for an
-    // actual PWR press (BoardConfig::enablePwrButtonExt0Wakeup) before ever
-    // running app.begin().
-    Serial.println("[main] no PWR press at boot (charging); staying off");
-    Serial.flush();
-    BoardConfig::holdBacklightOffForDeepSleep();
-    BoardConfig::releaseBatteryPowerHold();
-    BoardConfig::enablePwrButtonExt0Wakeup();
-    esp_deep_sleep_start();
+    // Booted without PWR being pressed - normally this means the USB cable
+    // was plugged in just to charge, so the reader drops straight back into
+    // the same deep-sleep "off" state a normal power-off uses (see below).
+    //
+    // But that decision used to happen within ~20ms of boot (this whole
+    // block plus the delay() above) — far faster than Windows can enumerate
+    // a USB CDC port and a terminal can open it, so plugging the cable in
+    // specifically to capture logs over Serial always got nothing: the
+    // device was already back in deep sleep before the host side was even
+    // ready to read. Give a real host a grace window to attach first. A dumb
+    // USB power brick never enumerates CDC's data lines, so Serial's DTR
+    // line-state (USBCDC::operator bool()) only goes true when an actual PC
+    // has the port open — that's a reliable "this is a deliberate tethered
+    // session, not silent charging" signal.
+    constexpr uint32_t kUsbHostGraceMs = 2500;
+    constexpr uint32_t kUsbHostPollMs = 100;
+    bool hostAttached = false;
+    for (uint32_t waited = 0; waited < kUsbHostGraceMs; waited += kUsbHostPollMs) {
+      if (Serial) {
+        hostAttached = true;
+        break;
+      }
+      delay(kUsbHostPollMs);
+    }
+
+    if (hostAttached) {
+      // A PC opened the port before we gave up — boot normally so touch and
+      // the app (dictaphone included) are usable while logs stream out. Note
+      // this skips BoardConfig::holdBatteryPowerIfAvailable() (only armed
+      // when PWR is physically held), so unplugging the cable here cuts
+      // power immediately instead of continuing on battery.
+      Serial.println("[main] USB host attached without PWR press; booting for tethered testing "
+                      "(no battery latch — unplugging cuts power immediately)");
+    } else {
+      Serial.println("[main] no PWR press at boot (charging); staying off");
+      Serial.flush();
+      BoardConfig::holdBacklightOffForDeepSleep();
+      BoardConfig::releaseBatteryPowerHold();
+      BoardConfig::enablePwrButtonExt0Wakeup();
+      esp_deep_sleep_start();
+    }
   }
 
   Serial.println("[main] app setup");
