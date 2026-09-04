@@ -303,12 +303,27 @@ void AudioRecorder::seekPlaybackBy(int32_t deltaMs) {
 // ─── I2S Configuration ──────────────────────────────────────────────────────
 
 bool AudioRecorder::configureI2sForRecording() {
+    // Slot width and frame format here must match how the ES7210 actually
+    // drives its output, not how the ES8311 (playback codec) expects to be
+    // fed — the two were wrongly assumed identical in every earlier attempt.
+    // Waveshare's own reference firmware for this exact board
+    // (waveshareteam/ESP32-S3-Touch-LCD-3.49, codec_board component) sets up
+    // its ES7210 RX channel with 32-bit MSB-justified slots
+    // (I2S_STD_MSB_SLOT_DEFAULT_CONFIG(32, STEREO) in their codec_init.c),
+    // while we were reading 16-bit Philips-standard slots — two independent
+    // mismatches (slot width AND the 1-BCLK launch-edge shift between MSB
+    // and Philips format) that would scramble every sample boundary. That
+    // matches the symptom exactly: a live but garbled/buzzing signal whose
+    // loudness tracked speech, rather than true silence.  MSB format here
+    // means the ES7210's 16 valid bits land at the top of each 32-bit slot
+    // (see the >>16 extraction in recordTaskLoop() below), not that the ADC
+    // itself runs at 32-bit resolution.
     i2s_config_t config = {};
     config.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX);
     config.sample_rate = kSampleRate;
-    config.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+    config.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT;
     config.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
-    config.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+    config.communication_format = I2S_COMM_FORMAT_STAND_MSB;
     config.intr_alloc_flags = 0;
     config.dma_buf_count = 4;
     config.dma_buf_len = 256;
@@ -337,7 +352,7 @@ bool AudioRecorder::configureI2sForRecording() {
         return false;
     }
 
-    i2s_set_clk(kI2sPort, kSampleRate, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_STEREO);
+    i2s_set_clk(kI2sPort, kSampleRate, I2S_BITS_PER_SAMPLE_32BIT, I2S_CHANNEL_STEREO);
     return true;
 }
 
@@ -828,19 +843,21 @@ void AudioRecorder::recordTaskLoop() {
         }
         zeroReadStreak = 0;
 
-        // Convert stereo 16-bit to mono. The ES7210 puts MIC1 on the left
-        // slot and MIC3 on the right (see selectEs7210Mics()) — two distinct
-        // real microphones, not a duplicated single signal — so averaging
-        // both is a genuine 2-mic downmix, and still degrades gracefully
-        // (half amplitude, not silence) if it turns out only one of the two
-        // is actually populated on this board.
-        size_t stereoSamples = bytesRead / 4;  // 2 bytes * 2 channels per sample
-        const int16_t* stereoData = reinterpret_cast<const int16_t*>(buffer);
+        // Convert stereo 32-bit (MSB-justified, ES7210's 16 valid bits at the
+        // top of each slot — see configureI2sForRecording()) to mono 16-bit.
+        // The ES7210 puts MIC1 on the left slot and MIC3 on the right (see
+        // selectEs7210Mics()) — two distinct real microphones, not a
+        // duplicated single signal — so averaging both is a genuine 2-mic
+        // downmix, and still degrades gracefully (half amplitude, not
+        // silence) if it turns out only one of the two is actually
+        // populated on this board.
+        size_t stereoSamples = bytesRead / 8;  // 4 bytes * 2 channels per sample
+        const int32_t* stereoData = reinterpret_cast<const int32_t*>(buffer);
         int16_t peakSample = 0;
         int16_t leftMin = 0, leftMax = 0, rightMin = 0, rightMax = 0;
         for (size_t i = 0; i < stereoSamples; i++) {
-            int32_t left = stereoData[i * 2];
-            int32_t right = stereoData[i * 2 + 1];
+            int32_t left = stereoData[i * 2] >> 16;
+            int32_t right = stereoData[i * 2 + 1] >> 16;
             if (i == 0) {
                 leftMin = leftMax = static_cast<int16_t>(left);
                 rightMin = rightMax = static_cast<int16_t>(right);
