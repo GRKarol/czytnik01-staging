@@ -50,6 +50,46 @@ constexpr uint8_t kEs8311GpReg45 = 0x45;
 constexpr uint8_t kIoConfigRegister = 0x03;
 constexpr uint8_t kIoOutputRegister = 0x01;
 
+// ES7210 register addresses (mic ADC codec — see BoardConfig::ES7210_ADDRESS
+// for why recording talks to this chip and not the ES8311). Verified against
+// Waveshare's own shipped reference firmware for this exact board
+// (waveshareteam/ESP32-S3-Touch-LCD-3.49, codec_board component, board id
+// "S3_LCD_3_49" — same MCLK/BCLK/WS/DIN/DOUT pins as our BoardConfig, ES7210
+// on the ADC side).
+constexpr uint8_t kEs7210ResetReg00 = 0x00;
+constexpr uint8_t kEs7210ClockOffReg01 = 0x01;
+constexpr uint8_t kEs7210MainClkReg02 = 0x02;
+constexpr uint8_t kEs7210OsrReg07 = 0x07;
+constexpr uint8_t kEs7210ModeConfigReg08 = 0x08;
+constexpr uint8_t kEs7210TimeControl0Reg09 = 0x09;
+constexpr uint8_t kEs7210TimeControl1Reg0A = 0x0A;
+constexpr uint8_t kEs7210SdpInterface1Reg11 = 0x11;
+constexpr uint8_t kEs7210SdpInterface2Reg12 = 0x12;
+constexpr uint8_t kEs7210Adc34Hpf2Reg20 = 0x20;
+constexpr uint8_t kEs7210Adc34Hpf1Reg21 = 0x21;
+constexpr uint8_t kEs7210Adc12Hpf1Reg22 = 0x22;
+constexpr uint8_t kEs7210Adc12Hpf2Reg23 = 0x23;
+constexpr uint8_t kEs7210AnalogReg40 = 0x40;
+constexpr uint8_t kEs7210Mic12BiasReg41 = 0x41;
+constexpr uint8_t kEs7210Mic34BiasReg42 = 0x42;
+constexpr uint8_t kEs7210Mic1GainReg43 = 0x43;
+constexpr uint8_t kEs7210Mic2GainReg44 = 0x44;
+constexpr uint8_t kEs7210Mic3GainReg45 = 0x45;
+constexpr uint8_t kEs7210Mic4GainReg46 = 0x46;
+constexpr uint8_t kEs7210Mic1PowerReg47 = 0x47;
+constexpr uint8_t kEs7210Mic2PowerReg48 = 0x48;
+constexpr uint8_t kEs7210Mic3PowerReg49 = 0x49;
+constexpr uint8_t kEs7210Mic4PowerReg4A = 0x4A;
+constexpr uint8_t kEs7210Mic12PowerReg4B = 0x4B;
+constexpr uint8_t kEs7210Mic34PowerReg4C = 0x4C;
+constexpr uint8_t kEs7210PowerDownReg06 = 0x06;
+
+// 30 dB gain, encoded the same way as the reference driver's
+// es7210_gain_value_t (raw enum value 10 = GAIN_30DB out of a 0-15 range —
+// see es7210_reg.h's gain_value enum), OR'd with bit4 (0x10) to enable the
+// PGA for that mic channel.
+constexpr uint8_t kEs7210MicGainEnabled30db = 0x1A;
+
 }  // namespace
 
 bool AudioRecorder::begin() {
@@ -346,87 +386,113 @@ void AudioRecorder::deinitI2s() {
 // ─── Codec Configuration ────────────────────────────────────────────────────
 
 bool AudioRecorder::configureCodecForRecording() {
-    uint8_t reg = 0;
-
-    // Noise-immunity warm-up, same as configureCodecForPlayback(). Espressif's
-    // own ES8311 driver writes this reg44 value twice before touching
-    // anything else and comments why: "occasional failures during the first
-    // I2C write with the ES8311 chip". This function resets the codec next,
-    // which is exactly the kind of fresh-after-reset state that write is meant
-    // to stabilize — recording was the one path skipping it, unlike playback.
-    if (!writeCodecRegister(kEs8311GpioReg44, 0x08)) return false;
-    if (!writeCodecRegister(kEs8311GpioReg44, 0x08)) return false;
-
-    // Reset codec
-    if (!writeCodecRegister(kEs8311ResetReg, 0x80)) return false;
-    delay(5);
-    if (!readCodecRegister(kEs8311ResetReg, reg)) return false;
-    if (!writeCodecRegister(kEs8311ResetReg, static_cast<uint8_t>(reg & 0xBF))) return false;
-
-    // Clock setup — MCLK from I2S master, 256x oversampling
-    if (!writeCodecRegister(kEs8311ClkManagerReg01, 0x3F)) return false;
-    if (!writeCodecRegister(kEs8311ClkManagerReg02, 0x00)) return false;
-    if (!writeCodecRegister(kEs8311ClkManagerReg03, 0x10)) return false;
-    if (!writeCodecRegister(kEs8311ClkManagerReg04, 0x10)) return false;
-    if (!writeCodecRegister(kEs8311ClkManagerReg05, 0x00)) return false;
-    if (!readCodecRegister(kEs8311ClkManagerReg06, reg)) return false;
-    if (!writeCodecRegister(kEs8311ClkManagerReg06, static_cast<uint8_t>((reg & 0xE0) | 0x03))) return false;
-    if (!readCodecRegister(kEs8311ClkManagerReg07, reg)) return false;
-    if (!writeCodecRegister(kEs8311ClkManagerReg07, static_cast<uint8_t>(reg & 0xC0))) return false;
-    if (!writeCodecRegister(kEs8311ClkManagerReg08, 0xFF)) return false;
-
-    // ADC serial data format: 16-bit I2S
-    if (!readCodecRegister(kEs8311SdPoutReg0A, reg)) return false;
-    reg = static_cast<uint8_t>((reg & 0xE0) | 0x0C);  // 16-bit
-    // Bit 6 of this register is a mute for the ADC's SDOUT line, not an
-    // enable — configureCodecForPlayback() sets it to 1 to deliberately
-    // silence the mic path during playback-only sessions. Recording needs
-    // the opposite: clear it so SDOUT actually carries ADC samples instead
-    // of the codec's own internal mute pattern (which is what the mic was
-    // capturing — a constant, near-zero signal, hence peak level stuck at 0%
-    // regardless of what reached the microphone).
-    reg &= static_cast<uint8_t>(~(1U << 6));
-    if (!writeCodecRegister(kEs8311SdPoutReg0A, reg)) return false;
-
-    // System configuration — power up ADC
-    if (!writeCodecRegister(kEs8311SystemReg0B, 0x00)) return false;
-    if (!writeCodecRegister(kEs8311SystemReg0C, 0x00)) return false;
-    if (!writeCodecRegister(kEs8311SystemReg10, 0x1F)) return false;
-    if (!writeCodecRegister(kEs8311SystemReg11, 0x7F)) return false;
-    if (!writeCodecRegister(kEs8311SystemReg0D, 0x01)) return false;
-    if (!writeCodecRegister(kEs8311SystemReg0E, 0x02)) return false;
-    if (!writeCodecRegister(kEs8311SystemReg12, 0x00)) return false;
-    if (!writeCodecRegister(kEs8311SystemReg13, 0x10)) return false;
-    if (!writeCodecRegister(kEs8311SystemReg14, 0x1A)) return false;
-
-    // ADC configuration — microphone input with PGA gain.
+    // The microphone on this board does not run through the ES8311 at all.
+    // Waveshare's own reference firmware for this exact board (board id
+    // "S3_LCD_3_49" in waveshareteam/ESP32-S3-Touch-LCD-3.49's codec_board
+    // component) shows two separate codecs sharing one I2S bus: ES8311 for
+    // DAC/speaker output, and a second ES7210 ADC codec (I2C address
+    // BoardConfig::ES7210_ADDRESS) for the mic. Every previous fix here
+    // (warm-up write, SDOUT unmute, PGA gain 0x07/0xC8 — all correct *ES8311*
+    // register values, cross-checked against Espressif's own es8311.c) left
+    // Pzm at 0% because none of it could ever reach a live signal: the
+    // ES8311's ADC path on this board has nothing wired to it. This function
+    // now talks to the ES7210 instead, using the same register sequence as
+    // Waveshare's shipped example (es7210.c's es7210_open()/es7210_start()),
+    // restricted to a plain 2-channel (non-TDM) I2S handoff so it drops
+    // straight into the existing 16-bit stereo RX path in
+    // configureI2sForRecording() below with no I2S protocol changes needed.
     //
-    // Reg 0x16 and 0x17 were wrong, and are the real reason Pzm sat at 0%
-    // through every previous fix. Checked against Espressif's own ES8311
-    // driver (esp-bsp/components/es8311/es8311.c, es8311_microphone_config()
-    // and es8311_microphone_gain_set()) — the same sequence used across the
-    // ESP32 board ecosystem:
-    //   - Reg 0x16 is the MIC PGA gain *select* register, not an "input
-    //     select" bitmask. It only accepts the small enum range
-    //     es8311_mic_gain_t (0 = 0dB ... 7 = 42dB). We were writing 0x24
-    //     (decimal 36) — miles outside that range, which leaves the PGA at
-    //     an undefined/near-zero gain regardless of what reaches the mic.
-    //     0x07 selects max gain (42dB) to give the best chance of a visible
-    //     signal; dial back later if it turns out to clip.
-    //   - Reg 0x17 is written 0xC8 by the reference driver as part of the
-    //     same call; our 0xBF diverged from that proven value.
-    if (!writeCodecRegister(kEs8311AdcReg15, 0x40)) return false;  // ADC power on
-    if (!writeCodecRegister(kEs8311AdcReg16, 0x07)) return false;  // MIC PGA gain: max (42dB)
-    if (!writeCodecRegister(kEs8311AdcReg17, 0xC8)) return false;  // ADC gain/range (Espressif reference value)
-    if (!writeCodecRegister(kEs8311AdcReg1B, 0x0A)) return false;  // MIC PGA gain
-    if (!writeCodecRegister(kEs8311AdcReg1C, 0x6A)) return false;  // ADC volume
+    // One assumption here is unverified: which two of the ES7210's four MIC
+    // inputs this board's physical dual-mic array is actually wired to.
+    // MIC1+MIC2 (both in the same "ADC12" analog domain) is the common
+    // wiring for a simple 2-mic board and needs no TDM, unlike MIC3/MIC4 —
+    // if Pzm is still 0% after this, the array may be on MIC3/MIC4 instead
+    // and this needs to change to that pair.
+    if (!writeEs7210Register(kEs7210ResetReg00, 0xFF)) return false;
+    if (!writeEs7210Register(kEs7210ResetReg00, 0x41)) return false;
+    if (!writeEs7210Register(kEs7210ClockOffReg01, 0x3F)) return false;
+    if (!writeEs7210Register(kEs7210TimeControl0Reg09, 0x30)) return false;
+    if (!writeEs7210Register(kEs7210TimeControl1Reg0A, 0x30)) return false;
+    if (!writeEs7210Register(kEs7210Adc12Hpf2Reg23, 0x2A)) return false;
+    if (!writeEs7210Register(kEs7210Adc12Hpf1Reg22, 0x0A)) return false;
+    if (!writeEs7210Register(kEs7210Adc34Hpf2Reg20, 0x0A)) return false;
+    if (!writeEs7210Register(kEs7210Adc34Hpf1Reg21, 0x2A)) return false;
 
-    // GPIO configuration
-    if (!writeCodecRegister(kEs8311GpioReg44, 0x58)) return false;
-    if (!writeCodecRegister(kEs8311GpReg45, 0x00)) return false;
+    // Slave mode — the ESP32 I2S peripheral is the master (see
+    // configureI2sForRecording()), same as the ES8311 side.
+    if (!updateEs7210RegisterBits(kEs7210ModeConfigReg08, 0x01, 0x00)) return false;
 
-    ESP_LOGI(TAG, "Codec configured for recording");
+    if (!writeEs7210Register(kEs7210AnalogReg40, 0x43)) return false;
+    if (!writeEs7210Register(kEs7210Mic12BiasReg41, 0x70)) return false;
+    if (!writeEs7210Register(kEs7210Mic34BiasReg42, 0x70)) return false;
+    if (!writeEs7210Register(kEs7210OsrReg07, 0x20)) return false;
+    if (!writeEs7210Register(kEs7210MainClkReg02, 0xC1)) return false;
+
+    if (!selectEs7210Mics()) return false;
+
+    // Sample format: normal (Philips) I2S, 16-bit.
+    uint8_t reg = 0;
+    if (!readEs7210Register(kEs7210SdpInterface1Reg11, reg)) return false;
+    if (!writeEs7210Register(kEs7210SdpInterface1Reg11, static_cast<uint8_t>(reg & 0xFC))) return false;
+    if (!readEs7210Register(kEs7210SdpInterface1Reg11, reg)) return false;
+    if (!writeEs7210Register(kEs7210SdpInterface1Reg11, static_cast<uint8_t>((reg & 0x1F) | 0x60))) return false;
+
+    // Power up (es7210_start(), called a second time by the reference driver
+    // on top of the mic_select() already done above).
+    if (!writeEs7210Register(kEs7210ClockOffReg01, 0x34)) return false;
+    if (!writeEs7210Register(kEs7210PowerDownReg06, 0x00)) return false;
+    if (!writeEs7210Register(kEs7210AnalogReg40, 0x43)) return false;
+    if (!writeEs7210Register(kEs7210Mic1PowerReg47, 0x08)) return false;
+    if (!writeEs7210Register(kEs7210Mic2PowerReg48, 0x08)) return false;
+    if (!writeEs7210Register(kEs7210Mic3PowerReg49, 0x08)) return false;
+    if (!writeEs7210Register(kEs7210Mic4PowerReg4A, 0x08)) return false;
+    if (!selectEs7210Mics()) return false;
+    if (!writeEs7210Register(kEs7210AnalogReg40, 0x43)) return false;
+    if (!writeEs7210Register(kEs7210ResetReg00, 0x71)) return false;
+    if (!writeEs7210Register(kEs7210ResetReg00, 0x41)) return false;
+
+    // Read back the registers that actually gate signal flow, so the next
+    // serial capture can tell "wrote correctly but MIC1/MIC2 aren't the
+    // populated pair" apart from "an I2C write silently didn't stick" —
+    // two previous fixes here turned out to be neither, and guessing a
+    // third time blind isn't worth another round trip without this.
+    uint8_t chk43 = 0, chk44 = 0, chk47 = 0, chk48 = 0, chk11 = 0, chk12 = 0;
+    readEs7210Register(kEs7210Mic1GainReg43, chk43);
+    readEs7210Register(kEs7210Mic2GainReg44, chk44);
+    readEs7210Register(kEs7210Mic1PowerReg47, chk47);
+    readEs7210Register(kEs7210Mic2PowerReg48, chk48);
+    readEs7210Register(kEs7210SdpInterface1Reg11, chk11);
+    readEs7210Register(kEs7210SdpInterface2Reg12, chk12);
+    ESP_LOGI(TAG, "ES7210 readback: gain1=%02X gain2=%02X pwr1=%02X pwr2=%02X sdp1=%02X sdp2=%02X "
+                  "(expect gain1/gain2=1A, pwr1/pwr2=08, sdp2=00)",
+             chk43, chk44, chk47, chk48, chk11, chk12);
+
+    ESP_LOGI(TAG, "Codec configured for recording (ES7210)");
     return true;
+}
+
+// Mirrors es7210_mic_select() from the reference driver, hardcoded to
+// MIC1+MIC2 (see the assumption noted in configureCodecForRecording()).
+bool AudioRecorder::selectEs7210Mics() {
+    for (uint8_t reg = kEs7210Mic1GainReg43; reg <= kEs7210Mic4GainReg46; reg++) {
+        if (!updateEs7210RegisterBits(reg, 0x10, 0x00)) return false;
+    }
+    if (!writeEs7210Register(kEs7210Mic12PowerReg4B, 0xFF)) return false;
+    if (!writeEs7210Register(kEs7210Mic34PowerReg4C, 0xFF)) return false;
+
+    // MIC1
+    if (!updateEs7210RegisterBits(kEs7210ClockOffReg01, 0x0B, 0x00)) return false;
+    if (!writeEs7210Register(kEs7210Mic12PowerReg4B, 0x00)) return false;
+    if (!updateEs7210RegisterBits(kEs7210Mic1GainReg43, 0x1F, kEs7210MicGainEnabled30db)) return false;
+
+    // MIC2
+    if (!updateEs7210RegisterBits(kEs7210ClockOffReg01, 0x0B, 0x00)) return false;
+    if (!writeEs7210Register(kEs7210Mic12PowerReg4B, 0x00)) return false;
+    if (!updateEs7210RegisterBits(kEs7210Mic2GainReg44, 0x1F, kEs7210MicGainEnabled30db)) return false;
+
+    // 2 mics selected — stays below the reference driver's TDM threshold
+    // (3+), so this is plain 2-channel (non-TDM) I2S output.
+    return writeEs7210Register(kEs7210SdpInterface2Reg12, 0x00);
 }
 
 bool AudioRecorder::configureCodecForPlayback() {
@@ -599,6 +665,31 @@ bool AudioRecorder::writeCodecRegister(uint8_t reg, uint8_t value) {
     return Wire1.endTransmission(true) == 0;
 }
 
+bool AudioRecorder::readEs7210Register(uint8_t reg, uint8_t& value) {
+    BoardConfig::I2cBusLock lock;
+    Wire1.beginTransmission(BoardConfig::ES7210_ADDRESS);
+    Wire1.write(reg);
+    if (Wire1.endTransmission(false) != 0) return false;
+    if (Wire1.requestFrom(static_cast<int>(BoardConfig::ES7210_ADDRESS), 1, 1) != 1) return false;
+    value = Wire1.read();
+    return true;
+}
+
+bool AudioRecorder::writeEs7210Register(uint8_t reg, uint8_t value) {
+    BoardConfig::I2cBusLock lock;
+    Wire1.beginTransmission(BoardConfig::ES7210_ADDRESS);
+    Wire1.write(reg);
+    Wire1.write(value);
+    return Wire1.endTransmission(true) == 0;
+}
+
+bool AudioRecorder::updateEs7210RegisterBits(uint8_t reg, uint8_t mask, uint8_t data) {
+    uint8_t value = 0;
+    if (!readEs7210Register(reg, value)) return false;
+    value = static_cast<uint8_t>((value & static_cast<uint8_t>(~mask)) | (mask & data));
+    return writeEs7210Register(reg, value);
+}
+
 // ─── WAV Header ─────────────────────────────────────────────────────────────
 
 static bool writeWavHeader(File& file, uint32_t sampleRate, uint16_t bitsPerSample, uint16_t numChannels) {
@@ -704,12 +795,12 @@ void AudioRecorder::recordTaskLoop() {
         }
         zeroReadStreak = 0;
 
-        // Convert stereo 16-bit to mono. Average both channels rather than
-        // keeping only the left one — the ES8311 mono mic path duplicates
-        // its signal onto both slots on this board, but if it turns out to
-        // only be present on one slot, averaging still captures it (at half
-        // amplitude) instead of silently discarding it by picking the wrong
-        // slot.
+        // Convert stereo 16-bit to mono. The ES7210 puts MIC1 on the left
+        // slot and MIC2 on the right (see selectEs7210Mics()) — two distinct
+        // real microphones, not a duplicated single signal — so averaging
+        // both is a genuine 2-mic downmix, and still degrades gracefully
+        // (half amplitude, not silence) if it turns out only one of the two
+        // is actually populated on this board.
         size_t stereoSamples = bytesRead / 4;  // 2 bytes * 2 channels per sample
         const int16_t* stereoData = reinterpret_cast<const int16_t*>(buffer);
         int16_t peakSample = 0;

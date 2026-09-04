@@ -50,6 +50,16 @@ constexpr int PIN_AUDIO_DIN = 6;
 constexpr int PIN_AUDIO_DOUT = 45;
 constexpr uint8_t ES8311_ADDRESS = 0x18;
 
+// Waveshare's own reference firmware for this board (S3_LCD_3_49 in their
+// codec_board component, github.com/waveshareteam/ESP32-S3-Touch-LCD-3.49)
+// confirms the mic path never runs through the ES8311 at all: this board has
+// two codecs sharing one I2S bus (same MCLK/BCLK/WS/DIN/DOUT pins as above)
+// — ES8311 for DAC/speaker output only, and a separate ES7210 ADC codec for
+// microphone input. Every previous ES8311 ADC-register fix (0x15/0x16/0x17/
+// 0x1B/0x1C) was chasing a chip that was never wired to a live microphone
+// signal on this board, which is why Pzm stayed at 0% regardless.
+constexpr uint8_t ES7210_ADDRESS = 0x40;
+
 struct BatteryStatus {
   bool present = false;
   float voltage = 0.0f;

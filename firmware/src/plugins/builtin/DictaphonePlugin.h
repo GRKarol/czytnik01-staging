@@ -107,6 +107,16 @@ class DictaphoneCore {
 
     // Currently recording filename (for adding to index after stop)
     char currentRecordingName_[kDictMaxFilenameLen] = {};
+
+    // Timestamp (event->timestampMs) of the last accepted tap/press. The
+    // touch controller can report a second phantom press-release cycle
+    // right after a real one — contact bounce on release, not a deliberate
+    // second tap — which was firing actions twice (e.g. two recordings
+    // deleted for one confirm tap, or a stray seek jump on the playback
+    // slider). Any new tap within kActionCooldownMs of the last one is
+    // treated as that bounce and ignored.
+    uint32_t lastActionMs_ = 0;
+    static constexpr uint32_t kActionCooldownMs = 350;
 };
 
 /// Plugin SDK vtable entry points for the Dictaphone built-in plugin.

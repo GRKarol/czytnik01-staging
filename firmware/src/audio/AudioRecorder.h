@@ -7,7 +7,8 @@
 #include <freertos/semphr.h>
 
 /**
- * AudioRecorder — records audio from the ES8311 codec ADC (microphone input)
+ * AudioRecorder — records audio from the ES7210 codec ADC (microphone input,
+ * a separate I2C device from the ES8311 — see BoardConfig::ES7210_ADDRESS)
  * via I2S and writes WAV files to SD card.
  *
  * Also handles playback of WAV files through the ES8311 DAC.
@@ -93,6 +94,15 @@ class AudioRecorder {
 
     bool readCodecRegister(uint8_t reg, uint8_t& value);
     bool writeCodecRegister(uint8_t reg, uint8_t value);
+
+    // Recording talks to a second, separate I2C codec — see the comment on
+    // BoardConfig::ES7210_ADDRESS for why. Kept as distinct helpers rather
+    // than an address parameter on the ES8311 ones above so a misplaced call
+    // can't silently address the wrong chip.
+    bool readEs7210Register(uint8_t reg, uint8_t& value);
+    bool writeEs7210Register(uint8_t reg, uint8_t value);
+    bool updateEs7210RegisterBits(uint8_t reg, uint8_t mask, uint8_t data);
+    bool selectEs7210Mics();
 
     static void recordTaskEntry(void* param);
     void recordTaskLoop();

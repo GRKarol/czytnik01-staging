@@ -257,7 +257,11 @@ static void bridgeRenderPlaybackControls(const char* title, bool paused, uint8_t
         buttons.push_back(b);
     };
 
-    addSquare("Stop", ui::IconId::Stop, 0);
+    // Labelled/iconed as "back to library", not "stop" — that's exactly what
+    // it already does (DictaphoneCore::stopPlayback() halts audio and
+    // navigates to Screen::Library in one call), but the old "Stop" label
+    // read as a transport control that would leave you on this same screen.
+    addSquare("Biblioteka", ui::IconId::Back, 0);
     addSquare("Gl -", ui::IconId::None, 1);
     addSquare(paused ? "Wznow" : "Pauza", paused ? ui::IconId::Play : ui::IconId::None, 2);
     addSquare("Gl +", ui::IconId::None, 3);

@@ -145,6 +145,13 @@ void DictaphoneCore::handleTouch(const PluginTouchEvent* event) {
     // Only handle touch end (tap)
     if (event->phase != 2) return;
 
+    // See lastActionMs_'s comment — this drops the phantom second release
+    // a real tap's contact bounce can produce, which was deleting two
+    // recordings per confirm and occasionally re-triggering the delete
+    // confirm screen on its own right after the library redraws.
+    if (event->timestampMs - lastActionMs_ < kActionCooldownMs) return;
+    lastActionMs_ = event->timestampMs;
+
     const uint16_t x = event->x;
     const uint16_t y = event->y;
 
@@ -248,7 +255,16 @@ void DictaphoneCore::handlePlayingTouch(const PluginTouchEvent* event) {
 
     if (onSlider) {
         if (event->phase == 0) {
+            // Same contact-bounce guard as the tap-release path below,
+            // applied to the *start* of a drag — without it, a phantom
+            // press right after a real button tap immediately jumped
+            // playback to whatever x it landed on, since a single touch
+            // here is enough to seek (see applySeekTouchX() below).
+            if (event->timestampMs - lastActionMs_ < kActionCooldownMs) {
+                return;
+            }
             draggingSeek_ = true;
+            lastActionMs_ = event->timestampMs;
         }
         if (draggingSeek_) {
             applySeekTouchX(x);
@@ -263,6 +279,8 @@ void DictaphoneCore::handlePlayingTouch(const PluginTouchEvent* event) {
 
     // Buttons act on release only, same as every other screen.
     if (event->phase != 2) return;
+    if (event->timestampMs - lastActionMs_ < kActionCooldownMs) return;
+    lastActionMs_ = event->timestampMs;
 
     if (y < kPlayingRowY || y >= static_cast<uint16_t>(kPlayingRowY + kPlayingRowH)) return;
     if (x < kPlayingButtonX0) return;
