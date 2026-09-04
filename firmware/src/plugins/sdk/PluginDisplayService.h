@@ -47,6 +47,16 @@ typedef struct PluginDisplayService {
     /// width the bridge uses to draw it.
     void (*renderDeletableList)(const char* const* items, uint8_t itemCount,
                                 uint8_t selectedIndex);
+
+    /// Real, tappable playback controls (e.g. a dictaphone's playing
+    /// screen): a row of square buttons — Stop, volume down, pause/resume,
+    /// volume up — plus a full-width draggable position slider below them.
+    /// `title` is drawn as small text at the very top (e.g. filename plus
+    /// elapsed/total time). The caller owns hit-testing for both the button
+    /// row and the slider's drag — see logicalWidth()/logicalHeight() and
+    /// match the same geometry the bridge draws with.
+    void (*renderPlaybackControls)(const char* title, bool paused, uint8_t volumePercent,
+                                   uint32_t elapsedSec, uint32_t totalSec);
 } PluginDisplayService;
 
 #ifdef __cplusplus

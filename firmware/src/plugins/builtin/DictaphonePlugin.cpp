@@ -15,6 +15,28 @@ static constexpr uint8_t kLibraryVisibleRows = 5;
 // zone (120px) since it doesn't need to be the primary target.
 static constexpr uint16_t kLibraryBackZoneWidth = 64;
 
+// Playing-screen layout — must match the constants of the same names in
+// DeviceServicesBridge.cpp's bridgeRenderPlaybackControls(), since that is
+// what actually draws this screen and these are the numbers used to hit-test
+// it. Kept as separate constants rather than shared ones because a plugin
+// binary and the firmware bridge are built and shipped independently.
+static constexpr uint16_t kPlayingRowY = 20;
+static constexpr uint16_t kPlayingRowH = 46;
+static constexpr uint16_t kPlayingButtonW = 145;
+static constexpr uint16_t kPlayingButtonGap = 4;
+static constexpr uint16_t kPlayingButtonX0 = 4;
+static constexpr uint16_t kPlayingSliderX = 4;
+static constexpr uint16_t kPlayingSliderY = 68;
+static constexpr uint16_t kPlayingSliderW = 632;
+static constexpr uint16_t kPlayingSliderH = 104;
+
+// Mirrors DisplayManager::sliderTrackRectFor()'s fixed formula for the
+// track's horizontal extent (trackX = button.x + 24, trackW = button.width
+// - 48) so applySeekTouchX() can convert a touch x into a slider value
+// without the plugin SDK needing to expose display internals. Only the x
+// axis matters here since dragging is horizontal.
+static constexpr int kSliderTrackMarginX = 24;
+
 // Singleton instance
 DictaphoneCore* s_instance = nullptr;
 
@@ -111,6 +133,15 @@ void DictaphoneCore::handleButton(const PluginButtonEvent* event) {
 
 void DictaphoneCore::handleTouch(const PluginTouchEvent* event) {
     if (!event) return;
+
+    // The Playing screen alone needs every touch phase (press + move +
+    // release) to make the seek slider draggable — everything else here
+    // only ever acts on tap-release.
+    if (screen_ == Screen::Playing) {
+        handlePlayingTouch(event);
+        return;
+    }
+
     // Only handle touch end (tap)
     if (event->phase != 2) return;
 
@@ -187,35 +218,6 @@ void DictaphoneCore::handleTouch(const PluginTouchEvent* event) {
             break;
         }
 
-        case Screen::Playing: {
-            // 3x2 zone grid (no dedicated render primitive for this many
-            // controls, so the split is invisible — documented for Karol
-            // instead of drawn):
-            //   top:    [<< -10s] [pauza/wznów] [+10s >>]
-            //   bottom: [gl. -]   [stop]         [gl. +]
-            int width = display_ && display_->logicalWidth ? display_->logicalWidth() : 640;
-            int height = display_ && display_->logicalHeight ? display_->logicalHeight() : 172;
-            const int colWidth = width / 3;
-            uint8_t col = static_cast<uint8_t>(x / colWidth);
-            if (col > 2) col = 2;
-            bool topRow = y < static_cast<uint16_t>(height / 2);
-
-            if (topRow) {
-                switch (col) {
-                    case 0: seekPlayback(-10000); break;
-                    case 1: togglePausePlayback(); break;
-                    case 2: seekPlayback(10000); break;
-                }
-            } else {
-                switch (col) {
-                    case 0: adjustVolume(-10); break;
-                    case 1: stopPlayback(); break;
-                    case 2: adjustVolume(10); break;
-                }
-            }
-            break;
-        }
-
         case Screen::ConfirmDelete: {
             int width = display_ && display_->logicalWidth ? display_->logicalWidth() : 640;
             // Left half = cancel, right half = confirm
@@ -235,6 +237,68 @@ void DictaphoneCore::handleTouch(const PluginTouchEvent* event) {
         default:
             break;
     }
+}
+
+void DictaphoneCore::handlePlayingTouch(const PluginTouchEvent* event) {
+    const uint16_t x = event->x;
+    const uint16_t y = event->y;
+
+    const bool onSlider =
+        y >= kPlayingSliderY && y < static_cast<uint16_t>(kPlayingSliderY + kPlayingSliderH);
+
+    if (onSlider) {
+        if (event->phase == 0) {
+            draggingSeek_ = true;
+        }
+        if (draggingSeek_) {
+            applySeekTouchX(x);
+        }
+        if (event->phase == 2) {
+            draggingSeek_ = false;
+        }
+        return;
+    }
+
+    draggingSeek_ = false;
+
+    // Buttons act on release only, same as every other screen.
+    if (event->phase != 2) return;
+
+    if (y < kPlayingRowY || y >= static_cast<uint16_t>(kPlayingRowY + kPlayingRowH)) return;
+    if (x < kPlayingButtonX0) return;
+
+    uint16_t rel = static_cast<uint16_t>(x - kPlayingButtonX0);
+    uint8_t col = static_cast<uint8_t>(rel / (kPlayingButtonW + kPlayingButtonGap));
+    if (col > 3) col = 3;
+
+    switch (col) {
+        case 0: stopPlayback(); break;
+        case 1: adjustVolume(-10); break;
+        case 2: togglePausePlayback(); break;
+        case 3: adjustVolume(10); break;
+    }
+}
+
+void DictaphoneCore::applySeekTouchX(uint16_t x) {
+    if (!audio_ || !audio_->playbackTotalMs || !audio_->playbackElapsedMs) return;
+
+    const int trackX = kPlayingSliderX + kSliderTrackMarginX;
+    const int trackW = static_cast<int>(kPlayingSliderW) - kSliderTrackMarginX * 2;
+    if (trackW <= 0) return;
+
+    int clampedX = static_cast<int>(x);
+    if (clampedX < trackX) clampedX = trackX;
+    if (clampedX > trackX + trackW) clampedX = trackX + trackW;
+
+    uint32_t total = audio_->playbackTotalMs();
+    if (total == 0) return;
+
+    float ratio = static_cast<float>(clampedX - trackX) / static_cast<float>(trackW);
+    uint32_t targetMs = static_cast<uint32_t>(ratio * static_cast<float>(total) + 0.5f);
+
+    uint32_t current = audio_->playbackElapsedMs();
+    int32_t delta = static_cast<int32_t>(targetMs) - static_cast<int32_t>(current);
+    seekPlayback(delta);
 }
 
 void DictaphoneCore::draw() {
@@ -313,9 +377,8 @@ void DictaphoneCore::drawLibrary() {
 }
 
 void DictaphoneCore::drawPlaying() {
-    if (!display_->renderProgress) return;
+    if (!display_->renderPlaybackControls) return;
 
-    char timeBuf[8];
     uint32_t elapsed = 0;
     uint32_t total = 0;
     uint8_t volume = 0;
@@ -328,20 +391,18 @@ void DictaphoneCore::drawPlaying() {
         if (audio_->isPaused) paused = audio_->isPaused();
     }
 
-    formatTime(elapsed, timeBuf, sizeof(timeBuf));
-
-    char elapsedTotal[32];
+    char timeBuf[8];
     char totalStr[8];
+    formatTime(elapsed, timeBuf, sizeof(timeBuf));
     formatTime(total, totalStr, sizeof(totalStr));
-    snprintf(elapsedTotal, sizeof(elapsedTotal), "%s / %s  Gl:%u%%",
-             timeBuf, totalStr, static_cast<unsigned>(volume));
-
-    int progress = (total > 0) ? static_cast<int>((elapsed * 100UL) / total) : 0;
 
     const char* name = (playingIndex_ < recordingCount_)
         ? recordingNames_[playingIndex_] : "---";
 
-    display_->renderProgress(paused ? "PAUZA" : "ODTWARZANIE", name, elapsedTotal, progress);
+    char title[64];
+    snprintf(title, sizeof(title), "%s  %s/%s", name, timeBuf, totalStr);
+
+    display_->renderPlaybackControls(title, paused, volume, elapsed / 1000, total / 1000);
 }
 
 void DictaphoneCore::drawRename() {
@@ -351,12 +412,12 @@ void DictaphoneCore::drawRename() {
 }
 
 void DictaphoneCore::drawConfirmDelete() {
-    if (!display_->renderStatus) return;
+    if (!display_->renderButtonPair) return;
 
-    const char* name = (deleteIndex_ < recordingCount_)
-        ? recordingNames_[deleteIndex_] : "---";
-
-    display_->renderStatus("USUNAC?", name, "Dotknij: lewo=Nie, prawo=Tak");
+    // Left/right halves here must match handleTouch()'s Screen::ConfirmDelete
+    // hit-test (x < width/2 = cancel, else = confirm) exactly, since that
+    // logic isn't derived from these buttons — it's just the same split.
+    display_->renderButtonPair("Anuluj", PLUGIN_ICON_NONE, false, "Usun", PLUGIN_ICON_DELETE);
 }
 
 // ─── Recording Actions ──────────────────────────────────────────────────────
@@ -483,6 +544,24 @@ bool DictaphoneCore::scanRecordings() {
                 if (storage_->fileExists && storage_->fileExists(checkPath)) {
                     strncpy(recordingNames_[recordingCount_], line, kDictMaxFilenameLen - 1);
                     recordingNames_[recordingCount_][kDictMaxFilenameLen - 1] = '\0';
+
+                    // recordingCounter_ only lives in RAM, so it always
+                    // restarts at 0 after a reboot — without this, the next
+                    // recording after any power cycle would reuse REC_0001.wav
+                    // (or whichever number a previous session already used),
+                    // silently overwriting that file on disk. Since multiple
+                    // library rows would then point at the same physical
+                    // file, deleting any one of them made fileExists() fail
+                    // for all of them on the next scan — "delete one, they
+                    // all vanish". Resuming the counter from the highest
+                    // REC_#### already on disk makes every new filename
+                    // unique again.
+                    unsigned recNum = 0;
+                    if (sscanf(recordingNames_[recordingCount_], "REC_%4u.wav", &recNum) == 1 &&
+                        recNum > recordingCounter_) {
+                        recordingCounter_ = static_cast<uint16_t>(recNum);
+                    }
+
                     recordingCount_++;
                 }
             }

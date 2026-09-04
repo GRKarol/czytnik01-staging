@@ -5,6 +5,7 @@
 #include <SD_MMC.h>
 #include <Wire.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "audio/AudioManager.h"
 #include "audio/AudioRecorder.h"
@@ -160,6 +161,13 @@ static void bridgeRenderButtonPair(const char* leftLabel, PluginIconId leftIcon,
 // since that's the only consumer today.
 static constexpr int kDeletableListIconZoneWidth = 120;
 
+// Width reserved for the visible Back button carved out of row 0 (the only
+// row it visually overlaps) — kept in sync with kLibraryBackZoneWidth in
+// DictaphonePlugin.cpp's touch handler, which already treats this whole
+// left strip as "go back" on every row, invisibly. This just makes that
+// existing behavior visible instead of adding a new one.
+static constexpr int kDeletableListBackZoneWidth = 64;
+
 static void bridgeRenderDeletableList(const char* const* items, uint8_t itemCount,
                                        uint8_t selectedIndex) {
     if (!sDisplay || !items || itemCount == 0) return;
@@ -169,16 +177,23 @@ static void bridgeRenderDeletableList(const char* const* items, uint8_t itemCoun
     const int rowHeight = height / itemCount;
 
     std::vector<DisplayManager::Button> buttons;
-    buttons.reserve(static_cast<size_t>(itemCount) * 2);
+    buttons.reserve(static_cast<size_t>(itemCount) * 2 + 1);
 
     for (uint8_t i = 0; i < itemCount; ++i) {
         DisplayManager::Button row;
         row.label = items[i] ? items[i] : "";
-        row.x = 0;
         row.y = static_cast<uint16_t>(i * rowHeight);
-        row.width = static_cast<uint16_t>(width - kDeletableListIconZoneWidth);
         row.height = static_cast<uint16_t>(rowHeight);
         row.active = (i == selectedIndex);
+        if (i == 0) {
+            // Leave room on the left for the Back button drawn below.
+            row.x = static_cast<uint16_t>(kDeletableListBackZoneWidth);
+            row.width = static_cast<uint16_t>(width - kDeletableListBackZoneWidth -
+                                              kDeletableListIconZoneWidth);
+        } else {
+            row.x = 0;
+            row.width = static_cast<uint16_t>(width - kDeletableListIconZoneWidth);
+        }
         buttons.push_back(row);
 
         DisplayManager::Button del;
@@ -194,7 +209,76 @@ static void bridgeRenderDeletableList(const char* const* items, uint8_t itemCoun
         buttons.push_back(del);
     }
 
+    // Same corner geometry as the app's own back buttons (see
+    // App::applyBackButtonCornerLayout) — a small icon-only tile, not a
+    // full-height zone, even though the tap zone it sits over is taller.
+    DisplayManager::Button back;
+    back.icon = ui::IconId::Back;
+    back.x = 0;
+    back.y = 2;
+    back.width = 44;
+    back.height = 26;
+    buttons.push_back(back);
+
     sDisplay->renderButtonGrid("", buttons, 0, 1);
+}
+
+// ─── Dictaphone Playback Controls ───────────────────────────────────────────
+//
+// Layout constants below must stay in sync with DictaphonePlugin.cpp's
+// handlePlayingTouch()/applySeekTouchX(), which derive their own hit-test
+// geometry from the same numbers instead of reading anything back — same
+// convention as the library's delete-icon zone above.
+static constexpr uint16_t kPlayingRowY = 20;
+static constexpr uint16_t kPlayingRowH = 46;
+static constexpr uint16_t kPlayingButtonW = 145;
+static constexpr uint16_t kPlayingButtonGap = 4;
+static constexpr uint16_t kPlayingButtonX0 = 4;
+static constexpr uint16_t kPlayingSliderX = 4;
+static constexpr uint16_t kPlayingSliderY = 68;
+static constexpr uint16_t kPlayingSliderW = 632;
+static constexpr uint16_t kPlayingSliderH = 104;
+
+static void bridgeRenderPlaybackControls(const char* title, bool paused, uint8_t volumePercent,
+                                          uint32_t elapsedSec, uint32_t totalSec) {
+    if (!sDisplay) return;
+
+    std::vector<DisplayManager::Button> buttons;
+    buttons.reserve(5);
+
+    auto addSquare = [&](const char* label, ui::IconId icon, uint8_t col) {
+        DisplayManager::Button b;
+        b.label = label;
+        b.icon = icon;
+        b.x = static_cast<uint16_t>(kPlayingButtonX0 + col * (kPlayingButtonW + kPlayingButtonGap));
+        b.y = kPlayingRowY;
+        b.width = kPlayingButtonW;
+        b.height = kPlayingRowH;
+        buttons.push_back(b);
+    };
+
+    addSquare("Stop", ui::IconId::Stop, 0);
+    addSquare("Gl -", ui::IconId::None, 1);
+    addSquare(paused ? "Wznow" : "Pauza", paused ? ui::IconId::Play : ui::IconId::None, 2);
+    addSquare("Gl +", ui::IconId::None, 3);
+
+    DisplayManager::Button slider;
+    slider.kind = DisplayManager::Button::ButtonKind::Slider;
+    char label[24];
+    snprintf(label, sizeof(label), "Pozycja  Gl:%u%%", static_cast<unsigned>(volumePercent));
+    slider.label = label;
+    slider.x = kPlayingSliderX;
+    slider.y = kPlayingSliderY;
+    slider.width = kPlayingSliderW;
+    slider.height = kPlayingSliderH;
+    slider.sliderMin = 0;
+    slider.sliderMax = static_cast<uint16_t>(totalSec > 0xFFFFu ? 0xFFFFu : totalSec);
+    uint32_t clampedElapsed = elapsedSec > slider.sliderMax ? slider.sliderMax : elapsedSec;
+    slider.sliderValue = static_cast<uint16_t>(clampedElapsed);
+    slider.sliderUnit = "s";
+    buttons.push_back(slider);
+
+    sDisplay->renderButtonGrid(title ? title : "", buttons, 0, 1);
 }
 
 static int bridgeLogicalWidth() {
@@ -458,6 +542,7 @@ void DeviceServicesBridge::setup(const char* pluginId,
         displayService->logicalHeight = bridgeLogicalHeight;
         displayService->renderButtonPair = bridgeRenderButtonPair;
         displayService->renderDeletableList = bridgeRenderDeletableList;
+        displayService->renderPlaybackControls = bridgeRenderPlaybackControls;
     }
 
     // Populate audio service function pointers

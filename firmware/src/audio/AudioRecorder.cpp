@@ -399,10 +399,25 @@ bool AudioRecorder::configureCodecForRecording() {
     if (!writeCodecRegister(kEs8311SystemReg13, 0x10)) return false;
     if (!writeCodecRegister(kEs8311SystemReg14, 0x1A)) return false;
 
-    // ADC configuration — microphone input with PGA gain
+    // ADC configuration — microphone input with PGA gain.
+    //
+    // Reg 0x16 and 0x17 were wrong, and are the real reason Pzm sat at 0%
+    // through every previous fix. Checked against Espressif's own ES8311
+    // driver (esp-bsp/components/es8311/es8311.c, es8311_microphone_config()
+    // and es8311_microphone_gain_set()) — the same sequence used across the
+    // ESP32 board ecosystem:
+    //   - Reg 0x16 is the MIC PGA gain *select* register, not an "input
+    //     select" bitmask. It only accepts the small enum range
+    //     es8311_mic_gain_t (0 = 0dB ... 7 = 42dB). We were writing 0x24
+    //     (decimal 36) — miles outside that range, which leaves the PGA at
+    //     an undefined/near-zero gain regardless of what reaches the mic.
+    //     0x07 selects max gain (42dB) to give the best chance of a visible
+    //     signal; dial back later if it turns out to clip.
+    //   - Reg 0x17 is written 0xC8 by the reference driver as part of the
+    //     same call; our 0xBF diverged from that proven value.
     if (!writeCodecRegister(kEs8311AdcReg15, 0x40)) return false;  // ADC power on
-    if (!writeCodecRegister(kEs8311AdcReg16, 0x24)) return false;  // MIC input select
-    if (!writeCodecRegister(kEs8311AdcReg17, 0xBF)) return false;  // ADC enable, HPF on
+    if (!writeCodecRegister(kEs8311AdcReg16, 0x07)) return false;  // MIC PGA gain: max (42dB)
+    if (!writeCodecRegister(kEs8311AdcReg17, 0xC8)) return false;  // ADC gain/range (Espressif reference value)
     if (!writeCodecRegister(kEs8311AdcReg1B, 0x0A)) return false;  // MIC PGA gain
     if (!writeCodecRegister(kEs8311AdcReg1C, 0x6A)) return false;  // ADC volume
 

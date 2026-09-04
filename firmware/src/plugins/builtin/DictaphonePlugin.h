@@ -33,6 +33,12 @@ class DictaphoneCore {
     void draw();
 
  private:
+    // Touch handling for the Playing screen — split out because it, alone,
+    // needs to react to every touch phase (drag) instead of just the
+    // release, to make the seek slider draggable.
+    void handlePlayingTouch(const PluginTouchEvent* event);
+    void applySeekTouchX(uint16_t x);
+
     // File management
     bool scanRecordings();
     bool generateFilename(char* buf, size_t bufSize);
@@ -80,6 +86,12 @@ class DictaphoneCore {
 
     // Currently playing index
     uint8_t playingIndex_ = 0;
+
+    // True while a finger is down inside the Playing screen's seek slider —
+    // lets handlePlayingTouch() keep tracking the drag across move events
+    // even though PluginTouchEvent gives no "which control did this touch
+    // start on" of its own.
+    bool draggingSeek_ = false;
 
     // Rename state
     uint8_t renameIndex_ = 0;
