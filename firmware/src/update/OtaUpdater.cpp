@@ -7,12 +7,27 @@
 #include <SD_MMC.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 #ifndef RSVP_FIRMWARE_VERSION
 #define RSVP_FIRMWARE_VERSION "dev"
 #endif
 
 namespace {
+
+// font_dl, book_dl i ekran Wi-Fi (main task) mogą wywołać connectWiFi()/
+// disconnectWiFi() z różnych zadań FreeRTOS w tym samym czasie. Bez tego
+// mutexa jedno zadanie robi WiFi.mode(WIFI_OFF) (pełny teardown sterownika)
+// dokładnie w chwili, gdy drugie ma otwarty WiFiClientSecure/HTTPClient —
+// destruktor tego drugiego wywołuje wtedy stop() na już zwolnionych
+// buforach sterownika Wi-Fi, co daje PANIC/LoadProhibited (potwierdzone
+// w coredumpie). Mutex trzyma całą sesję connect->...->disconnect jako
+// jeden blok, więc druga sesja czeka, zamiast wchodzić w kolizję.
+SemaphoreHandle_t wifiSessionMutex() {
+  static SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
+  return mutex;
+}
 
 constexpr const char *kConfigPaths[] = {
     "/config/ota.conf",
@@ -297,6 +312,10 @@ bool OtaUpdater::loadConfigFromPath(const char *path, Config &config) const {
 
 bool OtaUpdater::connectWiFi(const Config &config, StatusCallback callback,
                              void *context) const {
+  // Blokuje, aż zwolni się poprzednia sesja (font_dl/book_dl/ekran Wi-Fi) —
+  // patrz komentarz przy wifiSessionMutex() na początku pliku.
+  xSemaphoreTake(wifiSessionMutex(), portMAX_DELAY);
+
   WiFi.persistent(false);
   WiFi.setAutoReconnect(false);
   WiFi.mode(WIFI_STA);
@@ -310,12 +329,19 @@ bool OtaUpdater::connectWiFi(const Config &config, StatusCallback callback,
     delay(kWifiConnectPollMs);
   }
 
-  return WiFi.status() == WL_CONNECTED;
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  if (!connected) {
+    // Sesja się nie zaczęła — niektórzy wywołujący (font_dl/book_dl) nie
+    // wołają potem disconnectWiFi(), więc zwolnij mutex tutaj.
+    xSemaphoreGive(wifiSessionMutex());
+  }
+  return connected;
 }
 
 void OtaUpdater::disconnectWiFi() const {
   WiFi.disconnect(true, false);
   WiFi.mode(WIFI_OFF);
+  xSemaphoreGive(wifiSessionMutex());
 }
 
 bool OtaUpdater::fetchLatestRelease(const Config &config, LatestRelease &release,
