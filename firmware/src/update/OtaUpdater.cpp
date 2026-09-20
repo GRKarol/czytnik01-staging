@@ -339,7 +339,13 @@ bool OtaUpdater::connectWiFi(const Config &config, StatusCallback callback,
 }
 
 void OtaUpdater::disconnectWiFi() const {
-  WiFi.disconnect(true, false);
+  // wifioff=false: zostawia sterownik WiFi żywym na czas zdarzenia
+  // WIFI_EVENT_STA_DISCONNECTED (wątek sys_evt wysyła DHCP-release przez
+  // sieć). Natychmiastowe WiFi.mode(WIFI_OFF) po disconnect(true, ...)
+  // ubijało sterownik w trakcie tej transmisji (LoadProhibited w
+  // ieee80211_output_do, boot #53).
+  WiFi.disconnect(false, false);
+  delay(100);
   WiFi.mode(WIFI_OFF);
   xSemaphoreGive(wifiSessionMutex());
 }

@@ -194,7 +194,7 @@ class DisplayManager {
   void prepareForSleep();
   bool wakeFromSleep();
   void renderCenteredWord(const String &word, uint16_t color = 0xFFFF);
-  void renderBootSplashFadeIn(uint32_t blackMs, uint32_t fadeMs);
+  void renderBootSplash(uint32_t blackMs);
   void fadeInBacklight(uint32_t fadeMs);
   void fadeOutBacklight(uint32_t fadeMs);
   void renderRsvpWord(const String &word, const String &chapterLabel = "",

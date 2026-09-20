@@ -2307,7 +2307,7 @@ void DisplayManager::renderCenteredWord(const String &word, uint16_t color) {
   flushScaledFrame(scale, virtualWidth, virtualHeight);
 }
 
-void DisplayManager::renderBootSplashFadeIn(uint32_t blackMs, uint32_t fadeMs) {
+void DisplayManager::renderBootSplash(uint32_t blackMs) {
   if (!initialized_) {
     return;
   }
@@ -2323,8 +2323,8 @@ void DisplayManager::renderBootSplashFadeIn(uint32_t blackMs, uint32_t fadeMs) {
   static_assert(kBootSplashImageHeight == kDisplayHeight, "boot splash image must match panel height");
 
   // Backlight stays off for blackMs before the artwork is drawn, then the
-  // draw itself happens while still dark so the fade-in ramp below is the
-  // first light the panel shows — no flash of full brightness up front.
+  // draw itself happens while still dark so the panel switches straight
+  // from black to the finished frame — no flash of partial content.
   axs15231bSetBacklight(false);
   if (blackMs > 0) {
     delay(blackMs);
@@ -2340,7 +2340,16 @@ void DisplayManager::renderBootSplashFadeIn(uint32_t blackMs, uint32_t fadeMs) {
   flushScaledFrame(1, kBootSplashImageWidth, kBootSplashImageHeight);
   lastRenderKey_ = "";
 
-  fadeInBacklight(fadeMs);
+  // No brightness ramp here (was fadeInBacklight()): writeBacklightPwm()
+  // (axs15231b.cpp) reconfigures the LEDC channel from scratch on every
+  // duty-cycle write, which briefly detaches the backlight pin from PWM —
+  // since the backlight is active-low, that detach reads as a flash to full
+  // brightness. Across a ~30-step ramp that showed up as a visible pop
+  // partway through the animation. One write still glitches once, but
+  // going straight from black to the fully lit splash hides it instead of
+  // interrupting a smooth fade.
+  axs15231bSetBrightnessPercent(brightnessPercent_);
+  axs15231bSetBacklight(true);
 }
 
 void DisplayManager::fadeInBacklight(uint32_t fadeMs) {

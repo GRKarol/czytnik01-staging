@@ -26,8 +26,12 @@
 #endif
 
 static const char *kAppTag = "app";
-constexpr uint32_t kOtaCheckTaskStackBytes = 10240;
-constexpr uint32_t kFontDownloadTaskStackBytes = 10240;
+// 10240 B nie starczało: coredump z boot #36 pokazał this=0xcc8251fe (garbage)
+// przy konstrukcji HTTPClient wewnątrz OtaUpdater::downloadAsset — realny stack
+// overflow zadania, nie wyścig Wi-Fi. mbedTLS handshake + HTTPClient/WiFiClientSecure
+// + bufory 1024 B w tej samej ścieżce potrzebują więcej marginesu.
+constexpr uint32_t kOtaCheckTaskStackBytes = 20480;
+constexpr uint32_t kFontDownloadTaskStackBytes = 20480;
 // How often maybeAutoDownloadFonts() re-checks for saved Wi-Fi once the pack
 // isn't complete yet — deliberately not "once at boot only", since the user
 // may pair the Flower app and save Wi-Fi credentials well after first boot,
@@ -939,12 +943,13 @@ void App::begin() {
   logApp("Initializing hardware modules");
   const bool displayReady = display_.begin();
 
-  // Boot splash: a beat of black, then the artwork fades in — deliberate
-  // pacing instead of an instant flash. kBootSplashMs (the total time the
-  // Booting state holds before handing off to the wizard/reader) is sized
-  // to comfortably cover this sequence.
+  // Boot splash: a beat of black, then the artwork appears at full
+  // brightness (see DisplayManager::renderBootSplash() for why this isn't a
+  // fade — the backlight PWM driver glitches on every ramp step). kBootSplashMs
+  // (the total time the Booting state holds before handing off to the
+  // wizard/reader) is sized to comfortably cover this sequence.
   if (displayReady) {
-    display_.renderBootSplashFadeIn(kBootSplashBlackMs, kBootSplashFadeMs);
+    display_.renderBootSplash(kBootSplashBlackMs);
     logApp("Display init ok");
   } else {
     ESP_LOGE(kAppTag, "Display init failed");
