@@ -9,6 +9,19 @@
 
 App app;
 
+// Arduino core's loopTask (where setup()/loop() run, and where the manual
+// "Aktualizacja firmware" button drives OtaUpdater::checkAndInstall()
+// synchronously) defaults to an 8192 B stack. The mbedTLS handshake +
+// HTTPClient/WiFiClientSecure/HTTPUpdate chain that checkAndInstall() walks
+// through already needed 20480 B on a dedicated FreeRTOS task for the
+// background auto-check (see kOtaCheckTaskStackBytes in App.cpp, added after
+// a stack-overflow panic on that exact call path) — the manual button runs
+// the same code plus HTTPUpdate's flash-write buffers on top, on the
+// smaller default stack, which is the most likely cause of the freeze/crash
+// reported when tapping it. Override the core's weak
+// getArduinoLoopTaskStackSize() to give loopTask the same headroom.
+size_t getArduinoLoopTaskStackSize(void) { return 24576; }
+
 namespace {
 
 // Diagnostic only. On this board, power-on is a hardware cold boot done by

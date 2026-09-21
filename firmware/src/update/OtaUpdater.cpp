@@ -331,8 +331,22 @@ bool OtaUpdater::connectWiFi(const Config &config, StatusCallback callback,
 
   const bool connected = WiFi.status() == WL_CONNECTED;
   if (!connected) {
-    // Sesja się nie zaczęła — niektórzy wywołujący (font_dl/book_dl) nie
-    // wołają potem disconnectWiFi(), więc zwolnij mutex tutaj.
+    // Sesja się nie zaczęła, ale WiFi.begin() już uruchomił sterownik —
+    // trzeba go zgasić tutaj, POD mutexem, zanim go zwolnimy. Wcześniej ten
+    // teardown był zostawiony wywołującemu (checkOnly/checkAndInstall/
+    // installAsset zawsze wołały potem disconnectWiFi() też przy błędzie),
+    // co dawało podwójne zwolnienie mutexa: to zwolnienie tutaj, a chwilę
+    // później drugie w disconnectWiFi(). W tej szczelinie między nimi inne
+    // zadanie czekające na mutex (np. font_dl na drugim rdzeniu) mogło
+    // złapać go i odpalić własne WiFi.begin() dokładnie w momencie, gdy to
+    // zadanie robiło WiFi.mode(WIFI_OFF) — ten sam crash LoadProhibited co
+    // przy zwykłym rozłączeniu (patrz disconnectWiFi()), tylko wyzwolony
+    // nieudanym połączeniem zamiast udanego. Niektórzy wywołujący
+    // (font_dl/book_dl) nadal nie wołają disconnectWiFi() po błędzie — teraz
+    // nie muszą, bo pełny teardown+release dzieje się już tutaj.
+    WiFi.disconnect(false, false);
+    delay(100);
+    WiFi.mode(WIFI_OFF);
     xSemaphoreGive(wifiSessionMutex());
   }
   return connected;
@@ -377,8 +391,17 @@ bool OtaUpdater::fetchLatestRelease(const Config &config, LatestRelease &release
   http.addHeader("Accept", "application/vnd.github+json");
   const int statusCode = http.GET();
   if (statusCode != HTTP_CODE_OK) {
+    // Unauthenticated GitHub API requests return 404 for BOTH "no release
+    // yet" and "repo is private" (it never confirms a private repo exists) —
+    // and 403 almost always means the 60 req/hour unauthenticated rate limit
+    // got hit, not a real access problem. Distinguish these from a generic
+    // transport failure so the status screen doesn't just say "GitHub HTTP
+    // 404" for a case that code alone can't recover from (needs the repo
+    // public, or a token this build doesn't send).
     if (statusCode == HTTP_CODE_NOT_FOUND) {
-      errorDetail = "No published release";
+      errorDetail = "No release (or repo is private)";
+    } else if (statusCode == HTTP_CODE_FORBIDDEN) {
+      errorDetail = "GitHub rate limit (403)";
     } else {
       errorDetail = "GitHub HTTP " + String(statusCode);
     }
@@ -470,7 +493,10 @@ OtaUpdater::Result OtaUpdater::checkOnly(const Config &config, StatusCallback ca
   }
 
   if (!connectWiFi(config, callback, context)) {
-    disconnectWiFi();
+    // connectWiFi() już zgasiła sterownik i zwolniła mutex sama, w środku,
+    // pod osłoną tego samego mutexa — patrz komentarz w connectWiFi().
+    // Drugie wołanie disconnectWiFi() tutaj było zbędne i otwierało okno na
+    // wyścig z inną sesją WiFi.
     result.code = ResultCode::ConnectFailed;
     result.summary = "Wi-Fi failed";
     result.detail = "Check credentials";
@@ -522,7 +548,7 @@ OtaUpdater::Result OtaUpdater::checkAndInstall(const Config &config, StatusCallb
   }
 
   if (!connectWiFi(config, callback, context)) {
-    disconnectWiFi();
+    // Patrz komentarz w checkOnly() — connectWiFi() już posprzątała po sobie.
     result.code = ResultCode::ConnectFailed;
     result.summary = "Wi-Fi failed";
     result.detail = "Check credentials";
@@ -645,7 +671,7 @@ OtaUpdater::Result OtaUpdater::installAsset(const Config &config, const String &
   }
 
   if (!connectWiFi(config, callback, context)) {
-    disconnectWiFi();
+    // Patrz komentarz w checkOnly() — connectWiFi() już posprzątała po sobie.
     result.code = ResultCode::ConnectFailed;
     result.summary = "Wi-Fi failed";
     result.detail = "Check credentials";

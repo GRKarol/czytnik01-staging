@@ -335,6 +335,7 @@ class App {
   bool isBatteryBadgeTap(uint16_t x, uint16_t y) const;
   bool isPreviousSentenceTap(uint16_t x, uint16_t y) const;
   bool isSavePointButtonTap(uint16_t x, uint16_t y) const;
+  bool isCurrentPositionSaved() const;
   bool isActivelyReading() const;
   bool readerFooterVisible() const;
   DisplayManager::ReaderChrome readerChrome() const;
@@ -421,6 +422,12 @@ class App {
   /// i nawigacja musi traktować je wszystkie tak samo — bez tego helpera
   /// trzeba by powielać warunek w 6 miejscach.
   bool isSettingsListScreen() const;
+
+  /// Zwraca true dla 4 ekranów kreatora pierwszego uruchomienia (język /
+  /// motyw / kolor podświetlenia / tryb czytania), na których dotknięcie
+  /// kafelka tylko podświetla wybór — zastosowanie go i przejście dalej
+  /// wymaga osobnego przycisku Potwierdź (applyConfirmButtonCornerLayout()).
+  bool isWizardConfirmPickerScreen() const;
 
   /// Pełna lokalizacja 6-językowa przez TrKey (Translations.h).
   const char *tr(TrKey key) const;
@@ -695,6 +702,12 @@ class App {
   /// like every other button. Same Rect drives drawing and hit-testing, so
   /// there is exactly one place that can get the two out of sync.
   void applyBackButtonCornerLayout();
+  /// Wizard-picker-only (isWizardConfirmPickerScreen()): appends one extra
+  /// icon-only button (IconId::Check) pinned to the bottom-right corner,
+  /// mirroring applyBackButtonCornerLayout()'s top-left Back. Tapping it
+  /// applies whatever tile is currently highlighted and advances — see
+  /// kWizardConfirmCanonicalIndex in App.cpp.
+  void applyConfirmButtonCornerLayout();
   /// SettingsDisplay-only: gives specific rows (booleans, 3-way cycles) a
   /// widget that shows their current value at a glance — a toggle track or
   /// a row of state dots — instead of every setting looking like the same
@@ -705,7 +718,7 @@ class App {
   /// instead of every krój option looking identical until you tap it.
   void annotateTypographyFontPickerButton(DisplayManager::Button &button, size_t canonicalIndex) const;
   /// SavePointsList-only: gives the "+ Add save point" row and each named
-  /// save point the floppy-disk icon (ui::IconId::SavePoint) — drawn via
+  /// save point the bookmark icon (ui::IconId::SavePoint) — drawn via
   /// drawButtons()'s icon+label combo mode, since (unlike Back) these
   /// labels are real, variable text that can't be blanked to icon-only.
   void annotateSavePointsButton(DisplayManager::Button &button, size_t canonicalIndex) const;
@@ -1141,6 +1154,7 @@ class App {
   bool chapterTransitionVisible_ = false;
   bool batteryWarningOverlayVisible_ = false;
   bool otaCheckInProgress_ = false;
+  uint32_t otaCheckStartedMs_ = 0;
   bool otaUpdatePromptPending_ = false;
   bool otaUpdatePromptDismissed_ = false;
   bool fontDownloadInProgress_ = false;

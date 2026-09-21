@@ -57,13 +57,17 @@ class DisplayManager {
           showChapter(true),
           showProgress(true),
           showPreviousSentenceHint(true),
-          showSavePointButton(false) {}
+          showSavePointButton(false),
+          savePointAtCurrentPosition(false) {}
 
     bool showBattery;
     bool showChapter;
     bool showProgress;
     bool showPreviousSentenceHint;
     bool showSavePointButton;
+    // Current reading position exactly matches an existing save point —
+    // drawSavePointButton() draws a solid ribbon instead of a hollow one.
+    bool savePointAtCurrentPosition;
   };
 
   struct LibraryItem {
@@ -246,13 +250,19 @@ class DisplayManager {
                         size_t pageCount, const String &toastText = "",
                         bool showBatteryBadge = true, bool dotsOnLeft = false,
                         bool prominentTitle = false);
-  void renderStatus(const String &title, const String &line1 = "", const String &line2 = "");
+  // line1ScalePercent/line2ScalePercent domyślnie 36/28 (dotychczasowy
+  // rozmiar) — ekrany kreatora pierwszego uruchomienia proszą o większe
+  // wartości, żeby tekst był czytelny dla osób 40+, bez zmiany rozmiaru na
+  // pozostałych ~50 ekranach reużywających renderStatus().
+  void renderStatus(const String &title, const String &line1 = "", const String &line2 = "",
+                    uint8_t line1ScalePercent = 36, uint8_t line2ScalePercent = 28);
   // `hint` to trzecia, przygaszona linijka pod QR-em. Domyślnie zdanie dla
   // ekranu parowania z telefonem; ekran „zainstaluj aplikację" podaje swoje.
   void renderStatusWithQr(const String &title, const String &line1, const bool *qrData,
                           uint8_t qrSize, const String &hint = "Scan to connect");
   void renderProgress(const String &title, const String &line1 = "", const String &line2 = "",
-                      int progressPercent = -1);
+                      int progressPercent = -1, uint8_t line1ScalePercent = 36,
+                      uint8_t line2ScalePercent = 28);
   void renderLifeScreensaver(const std::vector<uint32_t> &cells, uint16_t columns, uint16_t rows,
                              uint32_t generation,
                              const std::vector<uint32_t> *dimCells = nullptr,
@@ -317,7 +327,9 @@ class DisplayManager {
   void drawSerifTextScaledCentered(const String &text, int y, uint16_t color, uint8_t scalePercent,
                                    int width, int xOffset);
   void drawButtons(const std::vector<Button> &buttons);
-  void drawIcon(ui::IconId id, int x, int y, int size, uint16_t color);
+  // filled=true draws a solid bookmark ribbon (SavePoint icon only — other
+  // icons ignore this flag); filled=false draws it hollow, outline only.
+  void drawIcon(ui::IconId id, int x, int y, int size, uint16_t color, bool filled = true);
   void blitIconBitmap(const uint16_t *bitmap, uint8_t w, uint8_t h, int x, int y);
   // Straight-line helper for the vector icon placeholders in drawIcon() —
   // linear-interpolation stepping (not true Bresenham, but plenty for
@@ -328,8 +340,10 @@ class DisplayManager {
   void drawBatteryBadge();
   void drawBatteryBadge(int logicalWidth, int logicalHeight);
   void drawPreviousSentenceHint();
-  void drawSavePointButton();
-  void drawSavePointButton(int logicalWidth, int logicalHeight);
+  // filled: whether the current reading position exactly matches an
+  // existing save point (solid ribbon) or not (hollow ribbon).
+  void drawSavePointButton(bool filled = false);
+  void drawSavePointButton(int logicalWidth, int logicalHeight, bool filled = false);
   void drawFooter(const String &chapterLabel, const String &statusLabel,
                   const ReaderChrome &chrome);
   void drawRsvpAnchorGuide(int anchorX, int textY, int textHeight);

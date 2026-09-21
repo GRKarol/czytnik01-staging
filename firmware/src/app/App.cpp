@@ -32,6 +32,15 @@ static const char *kAppTag = "app";
 // + bufory 1024 B w tej samej ścieżce potrzebują więcej marginesu.
 constexpr uint32_t kOtaCheckTaskStackBytes = 20480;
 constexpr uint32_t kFontDownloadTaskStackBytes = 20480;
+// connectWiFi() and fetchLatestRelease() each cap at 15s, so a healthy check
+// finishes well under 30s. If the ota_check task dies mid-flight (crash,
+// panic) it never reaches xQueueOverwrite(), so otaCheckInProgress_ would
+// otherwise stay stuck true for the rest of the boot — the manual
+// "Aktualizacja firmware" button then permanently shows "OTA check running /
+// Try again soon" (see blockNetworkActionForOtaCheck) with no way to retry
+// short of a restart. Treat a check that's run long past its own internal
+// timeouts as dead and release the lock.
+constexpr uint32_t kOtaCheckWatchdogTimeoutMs = 45000;
 // How often maybeAutoDownloadFonts() re-checks for saved Wi-Fi once the pack
 // isn't complete yet — deliberately not "once at boot only", since the user
 // may pair the Flower app and save Wi-Fi credentials well after first boot,
@@ -92,6 +101,11 @@ constexpr uint32_t kPressFlashMs = 140;
 // (capacitive-touch contact bounce reads as two quick taps from one
 // physical touch).
 constexpr uint32_t kGridTapDebounceMs = 200;
+// Sentinel canonicalIndex for the wizard-picker Confirm corner button (see
+// App::applyConfirmButtonCornerLayout()) — far past any real item count, so
+// the `canonicalIndex < itemCount` guards in handleGridTap() never mistake
+// it for a real tile and overwrite the current selection.
+constexpr size_t kWizardConfirmCanonicalIndex = 100000;
 // General cooldown after any menu action that commits/changes screen (see
 // App::selectMenuItem()) — swallows a second commit that lands right after
 // the first (fat-finger double tap, or capacitive-touch contact bounce that
@@ -2472,7 +2486,21 @@ DisplayManager::ReaderChrome App::readerChrome() const {
   chrome.showProgress = !reading || readerProgressVisibleWhilePlaying_;
   chrome.showPreviousSentenceHint = !contextViewVisible_ || scrollModeEnabled();
   chrome.showSavePointButton = savePointButtonVisible_;
+  chrome.savePointAtCurrentPosition = isCurrentPositionSaved();
   return chrome;
+}
+
+bool App::isCurrentPositionSaved() const {
+  if (currentBookPath_.isEmpty()) {
+    return false;
+  }
+  const size_t currentWord = reader_.currentIndex();
+  for (const auto &sp : savePoints_) {
+    if (sp.bookPath == currentBookPath_ && sp.wordIndex == currentWord) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool App::readerFooterVisible() const {
@@ -3125,19 +3153,44 @@ void App::applyMenuTouchGesture(const TouchEvent &event, uint32_t nowMs) {
     return;
   }
 
-  // Krok "Połącz z telefonem" i podgląd sposobu czytania nie mają listy ani
-  // siatki przycisków — cały ekran jest jednym przyciskiem. Obsługujemy tap
-  // tutaj (tak jak TypographyTuning niżej), żeby działał w każdym trybie
-  // nawigacji, a nie tylko w starym Swipe.
-  if (menuScreen_ == MenuScreen::WelcomeConnect) {
+  // Krok "Połącz z telefonem" i ekrany "Super!"/"Skonfigurujmy" nie mają
+  // listy ani siatki przycisków — cały ekran jest jednym przyciskiem
+  // "Dalej" (Super/ConfigureIntro dodatkowo auto-advance po 3s). Górny-lewy
+  // róg (ten sam 40x40 obszar co ikona Back w renderStatus/renderStatusWithQr
+  // i co przycisk Wróć w tutorialu wyżej) cofa o krok zamiast iść dalej —
+  // wcześniej jedynym sposobem cofnięcia stąd był fizyczny przycisk PWR.
+  if (menuScreen_ == MenuScreen::WelcomeConnect || menuScreen_ == MenuScreen::WelcomeSuper ||
+      menuScreen_ == MenuScreen::WelcomeConfigureIntro) {
     if (absDeltaX <= static_cast<int>(kTapSlopPx) && absDeltaY <= static_cast<int>(kTapSlopPx)) {
-      selectWelcomeConnectTap(nowMs);
+      if (event.x < 40 && event.y < 40) {
+        wizardStepBack(nowMs);
+      } else if (menuScreen_ == MenuScreen::WelcomeConnect) {
+        selectWelcomeConnectTap(nowMs);
+      }
     }
     return;
   }
   if (menuScreen_ == MenuScreen::WelcomeReadingModePreview) {
     if (absDeltaX <= static_cast<int>(kTapSlopPx) && absDeltaY <= static_cast<int>(kTapSlopPx)) {
       openWelcomeReadingMode();
+    }
+    return;
+  }
+
+  // Te 4 ekrany kreatora (wybór języka/motywu/koloru/sposobu czytania)
+  // reużywają zwykłą siatkę Ustawień, ale rebuildSettingsMenuItems() celowo
+  // NIE dodaje im pozycji "Wstecz" (to czysta lista wyboru) — bez tego bloku
+  // tap w lewym-górnym rogu trafiał w kafelek pierwszej pozycji (np.
+  // "English"/"Light") zamiast cofać, tak jak wszędzie indziej w kreatorze.
+  if ((menuScreen_ == MenuScreen::WelcomeLanguage || menuScreen_ == MenuScreen::WelcomeTheme ||
+       menuScreen_ == MenuScreen::WelcomeHighlightColor ||
+       menuScreen_ == MenuScreen::WelcomeReadingMode) &&
+      absDeltaX <= static_cast<int>(kTapSlopPx) && absDeltaY <= static_cast<int>(kTapSlopPx) &&
+      event.x < 40 && event.y < 40) {
+    // WelcomeLanguage to pierwszy krok — nie ma dokąd cofnąć, więc tap w
+    // rogu jest tu po prostu połykany zamiast przypadkowo wybierać "English".
+    if (menuScreen_ != MenuScreen::WelcomeLanguage) {
+      wizardStepBack(nowMs);
     }
     return;
   }
@@ -3828,6 +3881,7 @@ void App::renderItemGrid(const String &title, const std::vector<String> &items,
   }
 
   applyBackButtonCornerLayout();
+  applyConfirmButtonCornerLayout();
   // First-run wizard screens (language/theme/highlight/reading-mode picks)
   // get the same filled-bar, scale-2 title treatment as the toast below —
   // legible for low-vision users on their very first boot, instead of the
@@ -4012,6 +4066,31 @@ void App::applyBackButtonCornerLayout() {
   }
 }
 
+bool App::isWizardConfirmPickerScreen() const {
+  return menuScreen_ == MenuScreen::WelcomeLanguage || menuScreen_ == MenuScreen::WelcomeTheme ||
+         menuScreen_ == MenuScreen::WelcomeHighlightColor ||
+         menuScreen_ == MenuScreen::WelcomeReadingMode;
+}
+
+void App::applyConfirmButtonCornerLayout() {
+  if (!isWizardConfirmPickerScreen()) {
+    return;
+  }
+  DisplayManager::Button confirmButton;
+  confirmButton.icon = ui::IconId::Check;
+  confirmButton.label = "";
+  confirmButton.sublabel = "";
+  // Mirrors Back's top-left 44x26 corner rect (applyBackButtonCornerLayout())
+  // at the opposite corner, same 2px edge margin.
+  confirmButton.x = static_cast<uint16_t>(BoardConfig::DISPLAY_WIDTH - 44);
+  confirmButton.y = static_cast<uint16_t>(BoardConfig::DISPLAY_HEIGHT - 26 - 2);
+  confirmButton.width = 44;
+  confirmButton.height = 26;
+  confirmButton.armed = isGridItemFlashing(kWizardConfirmCanonicalIndex, millis());
+  currentGridButtons_.push_back(confirmButton);
+  currentGridItemIndices_.push_back(kWizardConfirmCanonicalIndex);
+}
+
 namespace {
 // SettingsDisplay rows are built as "<Name>: <current value>" — for
 // Toggle/Cycle buttons the widget itself shows the value (switch position,
@@ -4191,7 +4270,34 @@ bool App::handleGridTap(uint16_t x, uint16_t y, uint32_t nowMs) {
     // Checked by icon, not label text: the corner Back button's label is
     // blanked out by applyBackButtonCornerLayout() (icon-only rendering).
     const bool isBack = button.icon == ui::IconId::Back;
-    const bool needsConfirm = !isBack && isDestructiveGridLabel(button.label);
+    const bool isWizardConfirmButton =
+        button.icon == ui::IconId::Check && canonicalIndex == kWizardConfirmCanonicalIndex;
+
+    // Wizard picker screens (WelcomeLanguage/Theme/HighlightColor/
+    // ReadingMode): a tile tap only moves the highlight — applying the pick
+    // and advancing to the next step happens only on the dedicated Potwierdź
+    // corner button below. First-run users have no mental model yet for
+    // what a tap does here, so getting flung straight to the next screen by
+    // one touch is much more disorienting than it is for the identical
+    // toggle in regular Settings (which applies instantly, shows a toast,
+    // and can be flipped right back with one more tap).
+    if (isWizardConfirmPickerScreen() && !isBack && !isWizardConfirmButton) {
+      if (lastFiredGridItemIndex_ == static_cast<int>(canonicalIndex) &&
+          lastFiredGridScreen_ == menuScreen_ &&
+          (nowMs - lastFiredGridAtMs_) < kGridTapDebounceMs) {
+        return true;
+      }
+      if (canonicalIndex < itemCount) {
+        *selectedIndex = canonicalIndex;
+      }
+      lastFiredGridItemIndex_ = static_cast<int>(canonicalIndex);
+      lastFiredGridScreen_ = menuScreen_;
+      lastFiredGridAtMs_ = nowMs;
+      renderMenu();
+      return true;
+    }
+
+    const bool needsConfirm = !isBack && !isWizardConfirmButton && isDestructiveGridLabel(button.label);
 
     if (!needsConfirm || isGridItemArmed(canonicalIndex, nowMs)) {
       // Contact-bounce guard: a physical tap that briefly loses and regains
@@ -4961,7 +5067,12 @@ bool App::attemptWifiConnection(const String &ssid, const String &password, uint
   config.wifiSsid = ssid;
   config.wifiPassword = password;
   const bool connected = otaUpdater_.connectWiFi(config, &App::handleStorageStatus, this);
-  otaUpdater_.disconnectWiFi();
+  if (connected) {
+    // Na błędzie connectWiFi() już posprzątała i zwolniła sesję sama (patrz
+    // komentarz w OtaUpdater::connectWiFi) — drugie wołanie tutaj otwierało
+    // okno na wyścig z inną sesją WiFi (np. w tle działającym OTA-checkiem).
+    otaUpdater_.disconnectWiFi();
+  }
 
   if (connected) {
     display_.renderStatus("Wi-Fi", tr(TrKey::Connected), ssid);
@@ -6136,7 +6247,9 @@ void App::renderWelcomeLoading(uint32_t nowMs) {
   // 0->100 w pętli daje ten sam efekt "coś się dzieje" bez nowego kodu w
   // warstwie wyświetlacza.
   const int sawtoothPercent = static_cast<int>((elapsed % 2000UL) / 20UL);
-  display_.renderProgress("", phrase, bottomLabel, sawtoothPercent);
+  // Skala 42/38 zamiast domyślnej 36/28 — "Ładowanie..."/"Pobieranie..." było
+  // najmniejszym tekstem w kreatorze i nieczytelne dla osób 40+.
+  display_.renderProgress("", phrase, bottomLabel, sawtoothPercent, 42, 38);
 }
 
 // ─── Ekrany "Super!" / "Skonfigurujmy Twoje urządzenie!" ────────────────────
@@ -6155,7 +6268,9 @@ void App::openWelcomeConfigureIntro(uint32_t nowMs) {
 }
 
 void App::renderWelcomeTimedMessage(const String &line1, const String &line2) {
-  display_.renderStatus("", line1, line2);
+  // Skala 48% zamiast domyślnej 36% — to jedyny tekst na tych ekranach
+  // ("Super!" / "Skonfigurujmy Twoje urządzenie!"), więc może być duży.
+  display_.renderStatus("", line1, line2, 48, 28);
 }
 
 void App::updateWelcomeTimedScreens(uint32_t nowMs) {
@@ -6704,6 +6819,7 @@ bool App::startBackgroundOtaCheck(const OtaUpdater::Config &config) {
   params->resultQueue = otaCheckQueue_;
 
   otaCheckInProgress_ = true;
+  otaCheckStartedMs_ = millis();
   BaseType_t created = xTaskCreatePinnedToCore(otaCheckTask, "ota_check",
                                                kOtaCheckTaskStackBytes, params, 1, nullptr, 0);
   if (created != pdPASS) {
@@ -6745,14 +6861,22 @@ void App::otaCheckTask(void *params) {
 }
 
 void App::pollOtaCheckResult(uint32_t nowMs) {
-  (void)nowMs;
   if (otaCheckQueue_ == nullptr) {
     return;
+  }
+
+  if (otaCheckInProgress_ && otaCheckStartedMs_ != 0 &&
+      nowMs - otaCheckStartedMs_ > kOtaCheckWatchdogTimeoutMs) {
+    Serial.println("[ota] background check watchdog timeout — task never reported back, "
+                   "releasing lock");
+    otaCheckInProgress_ = false;
+    otaCheckStartedMs_ = 0;
   }
 
   OtaCheckResult result;
   while (xQueueReceive(otaCheckQueue_, &result, 0) == pdTRUE) {
     otaCheckInProgress_ = false;
+    otaCheckStartedMs_ = 0;
     Serial.printf("[ota] background result code=%u current=%s latest=%s\n",
                   static_cast<unsigned int>(result.code), result.currentVersion,
                   result.latestVersion);

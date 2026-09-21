@@ -2036,20 +2036,21 @@ void DisplayManager::drawPreviousSentenceHint() {
   drawTinyTextAt("<<", kFooterMarginX, kFooterMarginBottom, footerColor(), kTinyScale);
 }
 
-void DisplayManager::drawSavePointButton() {
-  drawSavePointButton(kDisplayWidth, kDisplayHeight);
+void DisplayManager::drawSavePointButton(bool filled) {
+  drawSavePointButton(kDisplayWidth, kDisplayHeight, filled);
 }
 
-void DisplayManager::drawSavePointButton(int logicalWidth, int logicalHeight) {
+void DisplayManager::drawSavePointButton(int logicalWidth, int logicalHeight, bool filled) {
   (void)logicalWidth;
   (void)logicalHeight;
-  // Same floppy-disk glyph as the Punkty zapisu list (ui::IconId::SavePoint)
+  // Same bookmark-ribbon glyph as the Punkty zapisu list (ui::IconId::SavePoint)
   // instead of a bare "SP" label, so the shortcut reads as "save" at a
   // glance instead of needing to be learned. Positioned right of the "<<"
-  // hint, same top row.
+  // hint, same top row. Solid when the current word is already a save
+  // point, hollow otherwise.
   const int spX = 40;
   const int spY = 4;
-  drawIcon(ui::IconId::SavePoint, spX, spY, 16, focusColor());
+  drawIcon(ui::IconId::SavePoint, spX, spY, 16, focusColor(), filled);
 }
 
 void DisplayManager::drawFooter(const String &chapterLabel, const String &statusLabel,
@@ -2449,7 +2450,7 @@ void DisplayManager::renderRsvpWord(const String &word, const String &chapterLab
     drawPreviousSentenceHint();
   }
   if (chrome.showSavePointButton) {
-    drawSavePointButton();
+    drawSavePointButton(chrome.savePointAtCurrentPosition);
   }
   if (chrome.showBattery) {
     drawBatteryBadge(virtualWidth, virtualHeight);
@@ -2497,7 +2498,7 @@ void DisplayManager::renderRsvpWordWithWpm(const String &word, uint16_t wpm,
     drawPreviousSentenceHint();
   }
   if (chrome.showSavePointButton) {
-    drawSavePointButton();
+    drawSavePointButton(chrome.savePointAtCurrentPosition);
   }
   if (chrome.showBattery) {
     drawBatteryBadge();
@@ -2558,7 +2559,7 @@ void DisplayManager::renderPhantomRsvpWord(const String &beforeText, const Strin
       drawPreviousSentenceHint();
     }
     if (chrome.showSavePointButton) {
-      drawSavePointButton();
+      drawSavePointButton(chrome.savePointAtCurrentPosition);
     }
     if (chrome.showBattery) {
       drawBatteryBadge();
@@ -2606,7 +2607,7 @@ void DisplayManager::renderPhantomRsvpWord(const String &beforeText, const Strin
     drawPreviousSentenceHint();
   }
   if (chrome.showSavePointButton) {
-    drawSavePointButton();
+    drawSavePointButton(chrome.savePointAtCurrentPosition);
   }
   if (chrome.showBattery) {
     drawBatteryBadge();
@@ -2817,7 +2818,7 @@ void DisplayManager::renderWordTickerView(const std::vector<ContextWord> &words,
     drawPreviousSentenceHint();
   }
   if (chrome.showSavePointButton) {
-    drawSavePointButton();
+    drawSavePointButton(chrome.savePointAtCurrentPosition);
   }
   if (!canUseBandOnly) {
     if (chrome.showBattery) {
@@ -2994,7 +2995,7 @@ void DisplayManager::renderPhantomRsvpWordWithWpm(const String &beforeText, cons
       drawPreviousSentenceHint();
     }
     if (chrome.showSavePointButton) {
-      drawSavePointButton();
+      drawSavePointButton(chrome.savePointAtCurrentPosition);
     }
     if (chrome.showBattery) {
       drawBatteryBadge();
@@ -3045,7 +3046,7 @@ void DisplayManager::renderPhantomRsvpWordWithWpm(const String &beforeText, cons
     drawPreviousSentenceHint();
   }
   if (chrome.showSavePointButton) {
-    drawSavePointButton();
+    drawSavePointButton(chrome.savePointAtCurrentPosition);
   }
   if (chrome.showBattery) {
     drawBatteryBadge();
@@ -3233,7 +3234,7 @@ void DisplayManager::renderScrollView(const std::vector<ContextWord> &words, uin
     drawPreviousSentenceHint();
   }
   if (chrome.showSavePointButton) {
-    drawSavePointButton();
+    drawSavePointButton(chrome.savePointAtCurrentPosition);
   }
   if (chrome.showBattery) {
     drawBatteryBadge();
@@ -3709,7 +3710,7 @@ void DisplayManager::drawFilledCircle(int cx, int cy, int radius, uint16_t color
 // DisplayManager exposes. These are intentionally blocky; real RGB565
 // bitmap art (button.iconBitmap) takes priority once it exists — see
 // blitIconBitmap() below and the Button::iconBitmap comment in the header.
-void DisplayManager::drawIcon(ui::IconId id, int x, int y, int size, uint16_t color) {
+void DisplayManager::drawIcon(ui::IconId id, int x, int y, int size, uint16_t color, bool filled) {
   if (id == ui::IconId::None || size <= 0) {
     return;
   }
@@ -3737,16 +3738,33 @@ void DisplayManager::drawIcon(ui::IconId id, int x, int y, int size, uint16_t co
       break;
     }
     case ui::IconId::SavePoint: {
-      // Floppy disk drawn as an outline in the accent color (frame, slider
-      // notch, label rect) — no solid background fill, so it reads as "a
-      // colored card on whatever's already behind it" instead of always
-      // punching a solid accent-colored square with a black center.
-      fillVirtualRect(x, y, s, 2, color);
-      fillVirtualRect(x, y + s - 2, s, 2, color);
-      fillVirtualRect(x, y, 2, s, color);
-      fillVirtualRect(x + s - 2, y, 2, s, color);
-      fillVirtualRect(x + s * 2 / 10, y, s * 6 / 10, s * 3 / 10, color);
-      fillVirtualRect(x + s * 3 / 10, y + s * 5 / 10, s * 4 / 10, s * 4 / 10 - 2, color);
+      // Bookmark ribbon: a rectangle with a V notch cut from the bottom,
+      // tapering to a point — the standard "bookmark" glyph instead of the
+      // old floppy disk. filled=true (an existing save point, or the
+      // current reading position matching one exactly) draws it solid;
+      // filled=false (nothing saved here yet) draws only the outline so it
+      // reads as "empty".
+      const int bodyW = s * 6 / 10;
+      const int notchH = s * 2 / 10;
+      const int bodyH = s * 8 / 10 - notchH;
+      const int leftX = x + s * 2 / 10;
+      if (filled) {
+        fillVirtualRect(leftX, y, bodyW, bodyH, color);
+        for (int row = 0; row < notchH; ++row) {
+          const int cut = (bodyW / 2) * row / std::max(1, notchH);
+          const int segW = bodyW / 2 - cut;
+          if (segW > 0) {
+            fillVirtualRect(leftX, y + bodyH + row, segW, 1, color);
+            fillVirtualRect(leftX + bodyW - segW, y + bodyH + row, segW, 1, color);
+          }
+        }
+      } else {
+        fillVirtualRect(leftX, y, bodyW, 2, color);
+        fillVirtualRect(leftX, y, 2, bodyH, color);
+        fillVirtualRect(leftX + bodyW - 2, y, 2, bodyH, color);
+        drawIconLine(leftX, y + bodyH, leftX + bodyW / 2, y + bodyH + notchH, color, 2);
+        drawIconLine(leftX + bodyW, y + bodyH, leftX + bodyW / 2, y + bodyH + notchH, color, 2);
+      }
       break;
     }
     case ui::IconId::Settings: {
@@ -4371,10 +4389,14 @@ void DisplayManager::renderButtonGrid(const String &title, const std::vector<But
   flushScaledFrame(scale, virtualWidth, virtualHeight);
 }
 
-void DisplayManager::renderStatus(const String &title, const String &line1, const String &line2) {
+void DisplayManager::renderStatus(const String &title, const String &line1, const String &line2,
+                                  uint8_t line1ScalePercentRequested,
+                                  uint8_t line2ScalePercentRequested) {
   const String renderKey = "status|" + title + "|" + line1 + "|" + line2 + "|b:" +
                            batteryLabel_ + "|d:" + String(darkMode_ ? 1 : 0) + "|n:" +
-                           String(nightMode_ ? 1 : 0);
+                           String(nightMode_ ? 1 : 0) + "|s1:" +
+                           String(line1ScalePercentRequested) + "|s2:" +
+                           String(line2ScalePercentRequested);
   if (!initialized_ || renderKey == lastRenderKey_) {
     return;
   }
@@ -4386,8 +4408,8 @@ void DisplayManager::renderStatus(const String &title, const String &line1, cons
   const int virtualHeight = kDisplayHeight;
   const int glyphHeight = baseGlyphHeightForTypeface(effectiveReaderTypefaceForText(title));
   const int titleY = std::max(0, (virtualHeight - glyphHeight) / 2 - 26);
-  const uint8_t line1ScalePercent = chromeLabelScalePercent(line1, 36);
-  const uint8_t line2ScalePercent = chromeLabelScalePercent(line2, 28);
+  const uint8_t line1ScalePercent = chromeLabelScalePercent(line1, line1ScalePercentRequested);
+  const uint8_t line2ScalePercent = chromeLabelScalePercent(line2, line2ScalePercentRequested);
   const int line1GlyphHeight = scaledPercentDimension(
       baseGlyphHeightForTypeface(effectiveReaderTypefaceForText(line1)), line1ScalePercent);
   const int line2GlyphHeight = scaledPercentDimension(
@@ -4518,20 +4540,23 @@ void DisplayManager::renderStatusWithQr(const String &title, const String &line1
   drawSerifTextScaledCentered(fitSerifTextScaled(hint, textAreaWidth, hintScalePercent), line2Y,
                               dimColor(), hintScalePercent, textAreaWidth, textAreaX);
 
-  // Wskazówka nawigacji
-  drawTinyTextAt("<", 4, 4, dimColor(), kTinyScale);
+  // Ikona Back w rogu — ten sam wektorowy chevron co w renderStatus(), nie
+  // maleńki bitmapowy znak "<" (nieczytelny, wyglądał jak inny font).
+  drawIcon(ui::IconId::Back, 4, 4, 16, dimColor());
   drawBatteryBadge();
 
   flushScaledFrame(scale, virtualWidth, virtualHeight);
 }
 
 void DisplayManager::renderProgress(const String &title, const String &line1, const String &line2,
-                                    int progressPercent) {
+                                    int progressPercent, uint8_t line1ScalePercentRequested,
+                                    uint8_t line2ScalePercentRequested) {
   progressPercent = std::max(-1, std::min(100, progressPercent));
   const String renderKey =
       "progress|" + title + "|" + line1 + "|" + line2 + "|" + String(progressPercent) +
       "|b:" + batteryLabel_ + "|d:" + String(darkMode_ ? 1 : 0) + "|n:" +
-      String(nightMode_ ? 1 : 0);
+      String(nightMode_ ? 1 : 0) + "|s1:" + String(line1ScalePercentRequested) + "|s2:" +
+      String(line2ScalePercentRequested);
   if (!initialized_ || renderKey == lastRenderKey_) {
     return;
   }
@@ -4543,8 +4568,8 @@ void DisplayManager::renderProgress(const String &title, const String &line1, co
   const int virtualHeight = kDisplayHeight;
   const int glyphHeight = baseGlyphHeightForTypeface(effectiveReaderTypefaceForText(title));
   const int titleY = std::max(0, (virtualHeight - glyphHeight) / 2 - 34);
-  const uint8_t line1ScalePercent = chromeLabelScalePercent(line1, 36);
-  const uint8_t line2ScalePercent = chromeLabelScalePercent(line2, 28);
+  const uint8_t line1ScalePercent = chromeLabelScalePercent(line1, line1ScalePercentRequested);
+  const uint8_t line2ScalePercent = chromeLabelScalePercent(line2, line2ScalePercentRequested);
   const int line1GlyphHeight = scaledPercentDimension(
       baseGlyphHeightForTypeface(effectiveReaderTypefaceForText(line1)), line1ScalePercent);
   const int line2GlyphHeight = scaledPercentDimension(
