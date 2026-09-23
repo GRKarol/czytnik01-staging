@@ -3865,6 +3865,20 @@ void App::renderItemGrid(const String &title, const std::vector<String> &items,
     }
     button.active = canonicalIndex == effectiveSelected;
     button.armed = isGridItemArmed(canonicalIndex, millis()) || isGridItemFlashing(canonicalIndex, millis());
+    if (!button.armed && canonicalIndex == effectiveSelected &&
+        (menuScreen_ == MenuScreen::SettingsDisplay || menuScreen_ == MenuScreen::SettingsPacing) &&
+        isConfirmGatedRow(menuScreen_, canonicalIndex)) {
+      // Confirm-gated Settings rows reuse the same solid-focus-color
+      // "armed" fill as the destructive two-tap flow — it's the same idea
+      // (one more tap elsewhere before this actually applies), so the tile
+      // needs to look unmistakably "picked, not yet applied" the same way,
+      // not a new visual language. Toggle/Cycle rows can't use the plain
+      // active-tint for this (see the tileActiveTint comment in
+      // DisplayManager.cpp — active there means on/off or cycle position,
+      // not selection), so armed is the only signal that works for every
+      // row kind on these screens.
+      button.armed = true;
+    }
     if (menuScreen_ == MenuScreen::SettingsDisplay) {
       annotateSettingsDisplayButton(button, canonicalIndex);
     } else if (menuScreen_ == MenuScreen::SavePointsList) {
@@ -4072,8 +4086,63 @@ bool App::isWizardConfirmPickerScreen() const {
          menuScreen_ == MenuScreen::WelcomeReadingMode;
 }
 
+bool App::isConfirmGatedRow(MenuScreen screen, size_t canonicalIndex) const {
+  if (screen == MenuScreen::WelcomeLanguage || screen == MenuScreen::WelcomeTheme ||
+      screen == MenuScreen::WelcomeHighlightColor || screen == MenuScreen::WelcomeReadingMode) {
+    // Every tile on a wizard picker screen is a value pick.
+    return true;
+  }
+  if (screen == MenuScreen::SettingsDisplay) {
+    switch (canonicalIndex) {
+      case kSettingsDisplayThemeIndex:
+      case kSettingsDisplayBrightnessIndex:
+      case kSettingsDisplayHandednessIndex:
+      case kSettingsDisplayFooterIndex:
+      case kSettingsDisplayBatteryIndex:
+      case kSettingsDisplayReaderBatteryIndex:
+      case kSettingsDisplayReaderChapterIndex:
+      case kSettingsDisplayReaderProgressIndex:
+      case kSettingsDisplayLanguageIndex:
+      case kSettingsDisplayFocusColorIndex:
+      case kSettingsDisplaySavePointBtnIndex:
+      case kSettingsDisplayHelpHintsIndex:
+      case kSettingsDisplayNavModeIndex:
+        return true;
+      default:
+        // Wróć and Wygaszacz (kSettingsDisplayScreensaverIndex) navigate to
+        // another screen instead of picking a value in place — those stay
+        // single-tap, same reasoning as isDestructiveGridLabel() above.
+        return false;
+    }
+  }
+  if (screen == MenuScreen::SettingsPacing) {
+    if (canonicalIndex == kSettingsPacingReadingModeIndex) {
+      return true;
+    }
+    if (readerMode_ == ReaderMode::Scroll) {
+      // kSettingsPacingScrollPreviewIndex opens a preview screen —
+      // navigation, not a value pick.
+      return canonicalIndex == kSettingsPacingScrollFontSizeIndex ||
+             canonicalIndex == kSettingsPacingScrollLineSpacingIndex ||
+             canonicalIndex == kSettingsPacingScrollMarginIndex;
+    }
+    // Flash mode: Wpm/LongWords/Complexity/Punctuation open dedicated editor
+    // screens, and Reset applies immediately as a single action — only
+    // PauseMode toggles a value in place.
+    return canonicalIndex == kSettingsPacingPauseModeIndex;
+  }
+  return false;
+}
+
 void App::applyConfirmButtonCornerLayout() {
-  if (!isWizardConfirmPickerScreen()) {
+  bool showConfirm = isWizardConfirmPickerScreen();
+  if (!showConfirm &&
+      (menuScreen_ == MenuScreen::SettingsDisplay || menuScreen_ == MenuScreen::SettingsPacing)) {
+    size_t itemCount = 0;
+    size_t *selectedIndex = currentMenuSelectedIndexPtr(itemCount);
+    showConfirm = selectedIndex != nullptr && isConfirmGatedRow(menuScreen_, *selectedIndex);
+  }
+  if (!showConfirm) {
     return;
   }
   DisplayManager::Button confirmButton;
@@ -4273,15 +4342,16 @@ bool App::handleGridTap(uint16_t x, uint16_t y, uint32_t nowMs) {
     const bool isWizardConfirmButton =
         button.icon == ui::IconId::Check && canonicalIndex == kWizardConfirmCanonicalIndex;
 
-    // Wizard picker screens (WelcomeLanguage/Theme/HighlightColor/
-    // ReadingMode): a tile tap only moves the highlight — applying the pick
-    // and advancing to the next step happens only on the dedicated Potwierdź
-    // corner button below. First-run users have no mental model yet for
-    // what a tap does here, so getting flung straight to the next screen by
-    // one touch is much more disorienting than it is for the identical
-    // toggle in regular Settings (which applies instantly, shows a toast,
-    // and can be flipped right back with one more tap).
-    if (isWizardConfirmPickerScreen() && !isBack && !isWizardConfirmButton) {
+    // Confirm-gated rows (see isConfirmGatedRow()): wizard picker screens
+    // (WelcomeLanguage/Theme/HighlightColor/ReadingMode) plus the
+    // value-cycling rows in SettingsDisplay/SettingsPacing (theme,
+    // brightness, on-screen indicators, etc.). A tile tap only moves the
+    // highlight — applying the pick happens only on the dedicated Potwierdź
+    // corner button below, so a stray tap can't silently flip a setting.
+    // Navigation rows on the same Settings screens (Wróć, Wygaszacz, the
+    // WPM/pauza editors) are excluded by isConfirmGatedRow() and keep the
+    // old instant-tap behaviour below.
+    if (isConfirmGatedRow(menuScreen_, canonicalIndex) && !isBack && !isWizardConfirmButton) {
       if (lastFiredGridItemIndex_ == static_cast<int>(canonicalIndex) &&
           lastFiredGridScreen_ == menuScreen_ &&
           (nowMs - lastFiredGridAtMs_) < kGridTapDebounceMs) {

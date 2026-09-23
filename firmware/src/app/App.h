@@ -429,6 +429,15 @@ class App {
   /// wymaga osobnego przycisku Potwierdź (applyConfirmButtonCornerLayout()).
   bool isWizardConfirmPickerScreen() const;
 
+  /// Ogólniejszy wariant isWizardConfirmPickerScreen() per-wiersz: true dla
+  /// każdego wiersza na 4 ekranach kreatora (jak wyżej) ORAZ dla wierszy w
+  /// SettingsDisplay/SettingsPacing które zmieniają wartość w miejscu (motyw,
+  /// jasność, wskaźniki na ekranie, itd.) — te też wymagają dotknięcia
+  /// przycisku Potwierdź zamiast stosowania zmiany od razu. Wiersze
+  /// nawigacyjne w tych samych ekranach (Wróć, Wygaszacz, edytory WPM/pauz)
+  /// zostają przy starym zachowaniu: działają na pierwsze dotknięcie.
+  bool isConfirmGatedRow(MenuScreen screen, size_t canonicalIndex) const;
+
   /// Pełna lokalizacja 6-językowa przez TrKey (Translations.h).
   const char *tr(TrKey key) const;
   const char *tr2(TrKey2 key) const;

@@ -4125,7 +4125,13 @@ void DisplayManager::drawButtons(const std::vector<Button> &buttons) {
       int dotX = static_cast<int>(button.x) + (static_cast<int>(button.width) - dotsW) / 2;
       for (uint8_t i = 0; i < button.cycleCount; ++i) {
         if (i == button.cycleState) {
-          drawFilledCircle(dotX, drawY, dotR, focusColor());
+          // Same background-then-color layering as the unlit dot below —
+          // without it, a lit dot on an armed tile (solid focusColor()
+          // fill, see the confirm-gated-row comment in renderItemGrid())
+          // would paint focusColor() straight onto a focusColor()
+          // background and disappear.
+          drawFilledCircle(dotX, drawY, dotR, backgroundColor());
+          drawFilledCircle(dotX, drawY, dotR - 1, focusColor());
         } else {
           drawFilledCircle(dotX, drawY, dotR, dimColor());
           drawFilledCircle(dotX, drawY, dotR - 1, backgroundColor());
