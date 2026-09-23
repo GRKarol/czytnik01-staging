@@ -1,6 +1,17 @@
 #pragma once
 
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
+// Guards every WiFi.mode()/WiFi.begin()/WiFi.disconnect() call against
+// concurrent use from a different FreeRTOS task — see the comment on the
+// definition in OtaUpdater.cpp for the LoadProhibited crash this prevents.
+// Exposed (not file-local) so other code that touches the WiFi driver from
+// its own task — CompanionSyncManager's AP mode for phone pairing — can join
+// the same session instead of racing OtaUpdater's font/book background
+// downloads.
+SemaphoreHandle_t wifiSessionMutex();
 
 class OtaUpdater {
  public:

@@ -14,8 +14,6 @@
 #define RSVP_FIRMWARE_VERSION "dev"
 #endif
 
-namespace {
-
 // font_dl, book_dl i ekran Wi-Fi (main task) mogą wywołać connectWiFi()/
 // disconnectWiFi() z różnych zadań FreeRTOS w tym samym czasie. Bez tego
 // mutexa jedno zadanie robi WiFi.mode(WIFI_OFF) (pełny teardown sterownika)
@@ -23,11 +21,15 @@ namespace {
 // destruktor tego drugiego wywołuje wtedy stop() na już zwolnionych
 // buforach sterownika Wi-Fi, co daje PANIC/LoadProhibited (potwierdzone
 // w coredumpie). Mutex trzyma całą sesję connect->...->disconnect jako
-// jeden blok, więc druga sesja czeka, zamiast wchodzić w kolizję.
+// jeden blok, więc druga sesja czeka, zamiast wchodzić w kolizję. Zewnętrzna
+// (nie w anonimowej przestrzeni nazw) bo CompanionSyncManager też musi
+// wejść w tę samą sesję zamiast ją omijać — patrz deklaracja w OtaUpdater.h.
 SemaphoreHandle_t wifiSessionMutex() {
   static SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
   return mutex;
 }
+
+namespace {
 
 constexpr const char *kConfigPaths[] = {
     "/config/ota.conf",

@@ -3851,6 +3851,20 @@ void DisplayManager::drawIcon(ui::IconId id, int x, int y, int size, uint16_t co
       fillVirtualRect(x + s * 2 / 10, y + s * 2 / 10, s * 6 / 10, s * 6 / 10, color);
       break;
     }
+    case ui::IconId::Eye: {
+      // Lens outline (flattened diamond, same blocky style as the rest of
+      // this set) + filled pupil — "tap to preview" glyph.
+      const int leftX = x;
+      const int rightX = x + s;
+      const int topY = y + s * 3 / 10;
+      const int botY = y + s * 7 / 10;
+      drawIconLine(leftX, cy, cx, topY, color, 2);
+      drawIconLine(cx, topY, rightX, cy, color, 2);
+      drawIconLine(rightX, cy, cx, botY, color, 2);
+      drawIconLine(cx, botY, leftX, cy, color, 2);
+      drawFilledCircle(cx, cy, s * 2 / 10, color);
+      break;
+    }
     default:
       break;
   }
@@ -4316,7 +4330,12 @@ void DisplayManager::renderButtonGrid(const String &title, const std::vector<But
       // toast below (see the toastText block further down) instead of the
       // tiny scale-1 label everywhere else uses — a first-run user reading
       // "Choose your language" needs the header legible, not a footnote.
-      const int barW = std::min(320, virtualWidth - 20);
+      // 320 used to cap this well below the 640px-wide screen's actual room,
+      // truncating longer titles ("Wybierz kolor podświetlenia", French
+      // "Choisissez la couleur de surbrillance") into a "..." ellipsis even
+      // though the bar could just be wider. 560 fits every wizard title in
+      // every supported language without truncation.
+      const int barW = std::min(560, virtualWidth - 20);
       const int barH = 18;
       const int barX = (virtualWidth - barW) / 2;
       const int barY = 2;

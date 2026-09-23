@@ -256,6 +256,7 @@ enum class TrKey3 : uint8_t {
   WelcomeLoadingBottomLoading,
   WelcomeLoadingBottomDownloading,
   WelcomePowerBackHint,
+  WifiSkipHint,
 };
 
 namespace Translations3 {

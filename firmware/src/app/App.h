@@ -464,6 +464,12 @@ class App {
   void selectWelcomeThemeItem(uint32_t nowMs);
   void openWelcomeHighlightColor();
   void selectWelcomeHighlightColorItem(uint32_t nowMs);
+  /// Live preview przy każdym dotknięciu kafelka na ekranach kreatora
+  /// Język/Motyw/Kolor podświetlenia — stosuje wybór natychmiast (widać
+  /// efekt: język, kolory, podświetlenie), zanim Potwierdź przejdzie dalej.
+  /// Potwierdź i tak wywołuje select*Item(), które robi to samo ponownie —
+  /// idempotentne, więc nie trzeba osobnego stanu "pending".
+  void previewWizardPickerSelection(uint32_t nowMs);
   void openWelcomeWifi();
   void returnFromWifiFlow(uint32_t nowMs);
   void openWelcomeLoading(uint32_t nowMs);
@@ -657,7 +663,7 @@ class App {
   void renderItemGrid(const String &title, const std::vector<String> &items, size_t selectedIndex,
                       size_t headerRows = 0, bool showBatteryBadge = true);
   void renderItemGridLibrary(const std::vector<DisplayManager::LibraryItem> &items,
-                             size_t selectedIndex);
+                             size_t selectedIndex, const String &title = "");
   /// Dispatches to whichever render function matches navMode_ — the button
   /// grid (Buttons), the cursor list (DPad, via DisplayManager::
   /// renderMenuWithDPad), or the bare scrollable list (Swipe, via
@@ -674,7 +680,7 @@ class App {
   /// subtitle) lists. DPad/Swipe show titles only — no room for a subtitle
   /// in a single compact list row.
   void renderMenuAnyModeLibrary(const std::vector<DisplayManager::LibraryItem> &items,
-                                size_t selectedIndex);
+                                size_t selectedIndex, const String &title = "");
   /// Returns the pointer/count pair describing the currently active menu
   /// screen's selection state — the single place that knows how each
   /// MenuScreen maps to its backing vector, reused by moveMenuSelection()
@@ -717,6 +723,11 @@ class App {
   /// applies whatever tile is currently highlighted and advances — see
   /// kWizardConfirmCanonicalIndex in App.cpp.
   void applyConfirmButtonCornerLayout();
+  /// WelcomeReadingMode-only: appends an eye-icon button pinned to the
+  /// top-left corner that previews whichever tile (RSVP/Przewijanie) is
+  /// currently highlighted, without requiring Potwierdź — see
+  /// kReadingModePreviewCanonicalIndex in App.cpp.
+  void applyReadingModePreviewButtonLayout();
   /// SettingsDisplay-only: gives specific rows (booleans, 3-way cycles) a
   /// widget that shows their current value at a glance — a toggle track or
   /// a row of state dots — instead of every setting looking like the same
@@ -1027,6 +1038,12 @@ class App {
   int lastFiredGridItemIndex_ = -1;
   uint32_t lastFiredGridAtMs_ = 0;
   MenuScreen lastFiredGridScreen_ = MenuScreen::Main;
+  // Same contact-bounce guard as lastFiredGridItemIndex_ above, but for the
+  // on-screen text-entry keyboard — handleTextEntryTap() is a separate code
+  // path that never inherited it, so a spurious double touch-release on one
+  // physical key press typed the same character twice.
+  int lastFiredTextEntryButtonIndex_ = -1;
+  uint32_t lastFiredTextEntryAtMs_ = 0;
   // General commit-action cooldown — see kMenuActionDebounceMs in App.cpp.
   // 0 means "no action fired yet" so the very first selectMenuItem() call
   // after boot is never swallowed.

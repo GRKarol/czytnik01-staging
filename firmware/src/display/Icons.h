@@ -24,6 +24,7 @@ enum class IconId : uint8_t {
   Check,
   Record,
   Stop,
+  Eye,
 };
 
 }  // namespace ui

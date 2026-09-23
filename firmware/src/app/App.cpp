@@ -101,11 +101,27 @@ constexpr uint32_t kPressFlashMs = 140;
 // (capacitive-touch contact bounce reads as two quick taps from one
 // physical touch).
 constexpr uint32_t kGridTapDebounceMs = 200;
+// Shorter than kGridTapDebounceMs on purpose: real typing legitimately hits
+// the same key twice in a row close together (double letters), so this only
+// needs to be long enough to eat capacitive contact-bounce (typically well
+// under 100ms) without eating a fast typist's real repeat keystroke.
+constexpr uint32_t kTextEntryTapDebounceMs = 90;
 // Sentinel canonicalIndex for the wizard-picker Confirm corner button (see
 // App::applyConfirmButtonCornerLayout()) — far past any real item count, so
 // the `canonicalIndex < itemCount` guards in handleGridTap() never mistake
 // it for a real tile and overwrite the current selection.
 constexpr size_t kWizardConfirmCanonicalIndex = 100000;
+// Visible size of the wizard Confirm corner button — bigger than Back's
+// 44x26 (see applyConfirmButtonCornerLayout()) because it's the one button
+// that commits a whole wizard step and was reported too small to hit
+// reliably with a thumb.
+constexpr uint16_t kWizardConfirmButtonWidth = 70;
+constexpr uint16_t kWizardConfirmButtonHeight = 40;
+// Sentinel canonicalIndex for the WelcomeReadingMode "preview" eye-icon
+// corner button (see App::applyReadingModePreviewButtonLayout()) — a
+// different sentinel than kWizardConfirmCanonicalIndex so the two never
+// collide when both appear together in currentGridItemIndices_.
+constexpr size_t kReadingModePreviewCanonicalIndex = 100001;
 // General cooldown after any menu action that commits/changes screen (see
 // App::selectMenuItem()) — swallows a second commit that lands right after
 // the first (fat-finger double tap, or capacitive-touch contact bounce that
@@ -3177,14 +3193,16 @@ void App::applyMenuTouchGesture(const TouchEvent &event, uint32_t nowMs) {
     return;
   }
 
-  // Te 4 ekrany kreatora (wybór języka/motywu/koloru/sposobu czytania)
-  // reużywają zwykłą siatkę Ustawień, ale rebuildSettingsMenuItems() celowo
-  // NIE dodaje im pozycji "Wstecz" (to czysta lista wyboru) — bez tego bloku
-  // tap w lewym-górnym rogu trafiał w kafelek pierwszej pozycji (np.
+  // Te 3 ekrany kreatora (wybór języka/motywu/koloru) reużywają zwykłą
+  // siatkę Ustawień, ale rebuildSettingsMenuItems() celowo NIE dodaje im
+  // pozycji "Wstecz" (to czysta lista wyboru) — bez tego bloku tap w
+  // lewym-górnym rogu trafiał w kafelek pierwszej pozycji (np.
   // "English"/"Light") zamiast cofać, tak jak wszędzie indziej w kreatorze.
+  // WelcomeReadingMode NIE jest tu wymieniony — ten róg zajmuje teraz
+  // prawdziwy przycisk (ikonka oka, applyReadingModePreviewButtonLayout()),
+  // więc tap musi przejść do handleGridTap() niżej zamiast być połykany.
   if ((menuScreen_ == MenuScreen::WelcomeLanguage || menuScreen_ == MenuScreen::WelcomeTheme ||
-       menuScreen_ == MenuScreen::WelcomeHighlightColor ||
-       menuScreen_ == MenuScreen::WelcomeReadingMode) &&
+       menuScreen_ == MenuScreen::WelcomeHighlightColor) &&
       absDeltaX <= static_cast<int>(kTapSlopPx) && absDeltaY <= static_cast<int>(kTapSlopPx) &&
       event.x < 40 && event.y < 40) {
     // WelcomeLanguage to pierwszy krok — nie ma dokąd cofnąć, więc tap w
@@ -3896,6 +3914,7 @@ void App::renderItemGrid(const String &title, const std::vector<String> &items,
 
   applyBackButtonCornerLayout();
   applyConfirmButtonCornerLayout();
+  applyReadingModePreviewButtonLayout();
   // First-run wizard screens (language/theme/highlight/reading-mode picks)
   // get the same filled-bar, scale-2 title treatment as the toast below —
   // legible for low-vision users on their very first boot, instead of the
@@ -3909,7 +3928,7 @@ void App::renderItemGrid(const String &title, const std::vector<String> &items,
 }
 
 void App::renderItemGridLibrary(const std::vector<DisplayManager::LibraryItem> &items,
-                                size_t selectedIndex) {
+                                size_t selectedIndex, const String &title) {
   applyReaderUiOrientation();
 
   currentGridButtons_.clear();
@@ -3926,7 +3945,14 @@ void App::renderItemGridLibrary(const std::vector<DisplayManager::LibraryItem> &
   }
 
   // Same corner-Back exclusion as renderItemGrid() — see the comment there.
-  const bool hasBack = items[0].title == uiText(UiText::Back);
+  // Also pulls the wizard-only "Pomiń"/"Skip" row (WifiNetworks/BookPicker
+  // reused inside the onboarding wizard) into the same small corner slot —
+  // it used to render as a full-size tile, competing visually with the real
+  // choices even though skipping Wi-Fi/the starter book is the exception,
+  // not the recommended path.
+  const bool isRealBack = items[0].title == uiText(UiText::Back);
+  const bool isSkip = items[0].title == tr2(TrKey2::SkipForNow);
+  const bool hasBack = isRealBack || isSkip;
   const size_t tileCount = hasBack ? items.size() - 1 : items.size();
   const size_t tileSelected =
       hasBack ? (effectiveSelected == 0 ? 0 : effectiveSelected - 1) : effectiveSelected;
@@ -3963,11 +3989,23 @@ void App::renderItemGridLibrary(const std::vector<DisplayManager::LibraryItem> &
   currentGridButtons_.reserve(itemsOnPage + (hasBack ? 1 : 0));
 
   if (hasBack) {
-    DisplayManager::Button backButton;
-    backButton.icon = ui::IconId::Back;
-    backButton.active = effectiveSelected == 0;
-    backButton.armed = isGridItemArmed(0, millis()) || isGridItemFlashing(0, millis());
-    currentGridButtons_.push_back(backButton);
+    DisplayManager::Button cornerButton;
+    if (isRealBack) {
+      cornerButton.icon = ui::IconId::Back;
+      // Position finalized below by applyBackButtonCornerLayout().
+    } else {
+      // "Pomiń"/"Skip" — small text corner button, not positioned by
+      // applyBackButtonCornerLayout() (that only matches icon==Back), so set
+      // its rect directly here. Deliberately smaller than a real grid tile.
+      cornerButton.label = items[0].title;
+      cornerButton.x = 0;
+      cornerButton.y = 2;
+      cornerButton.width = 60;
+      cornerButton.height = 22;
+    }
+    cornerButton.active = effectiveSelected == 0;
+    cornerButton.armed = isGridItemArmed(0, millis()) || isGridItemFlashing(0, millis());
+    currentGridButtons_.push_back(cornerButton);
     currentGridItemIndices_.push_back(0);
   }
 
@@ -3987,7 +4025,7 @@ void App::renderItemGridLibrary(const std::vector<DisplayManager::LibraryItem> &
   }
 
   applyBackButtonCornerLayout();
-  display_.renderButtonGrid("", currentGridButtons_, page, pageCount);
+  display_.renderButtonGrid(title, currentGridButtons_, page, pageCount, activeGridToastText(millis()));
 }
 
 void App::renderMenuAnyMode(const String &title, const std::vector<String> &items,
@@ -4016,9 +4054,9 @@ void App::renderMenuAnyMode(const String &title, const std::vector<String> &item
 }
 
 void App::renderMenuAnyModeLibrary(const std::vector<DisplayManager::LibraryItem> &items,
-                                   size_t selectedIndex) {
+                                   size_t selectedIndex, const String &title) {
   if (navMode_ == NavMode::Buttons) {
-    renderItemGridLibrary(items, selectedIndex);
+    renderItemGridLibrary(items, selectedIndex, title);
     return;
   }
 
@@ -4083,7 +4121,14 @@ void App::applyBackButtonCornerLayout() {
 bool App::isWizardConfirmPickerScreen() const {
   return menuScreen_ == MenuScreen::WelcomeLanguage || menuScreen_ == MenuScreen::WelcomeTheme ||
          menuScreen_ == MenuScreen::WelcomeHighlightColor ||
-         menuScreen_ == MenuScreen::WelcomeReadingMode;
+         menuScreen_ == MenuScreen::WelcomeReadingMode ||
+         // Font picker reused from Ustawienia > Typografia — only gated in
+         // wizard mode. Outside the wizard it stays instant tap-to-apply
+         // (unchanged, matches every other Settings row); inside the wizard
+         // a tap used to commit AND immediately advance past this screen in
+         // one motion, so there was no way to look at more than one font
+         // before the wizard moved on.
+         (menuScreen_ == MenuScreen::TypographyFontPicker && wizardFontPickerActive_);
 }
 
 bool App::isConfirmGatedRow(MenuScreen screen, size_t canonicalIndex) const {
@@ -4099,7 +4144,8 @@ bool App::isConfirmGatedRow(MenuScreen screen, size_t canonicalIndex) const {
   // potwierdzenia").
   (void)canonicalIndex;
   return screen == MenuScreen::WelcomeLanguage || screen == MenuScreen::WelcomeTheme ||
-         screen == MenuScreen::WelcomeHighlightColor || screen == MenuScreen::WelcomeReadingMode;
+         screen == MenuScreen::WelcomeHighlightColor || screen == MenuScreen::WelcomeReadingMode ||
+         (screen == MenuScreen::TypographyFontPicker && wizardFontPickerActive_);
 }
 
 void App::applyConfirmButtonCornerLayout() {
@@ -4111,15 +4157,41 @@ void App::applyConfirmButtonCornerLayout() {
   confirmButton.icon = ui::IconId::Check;
   confirmButton.label = "";
   confirmButton.sublabel = "";
-  // Mirrors Back's top-left 44x26 corner rect (applyBackButtonCornerLayout())
-  // at the opposite corner, same 2px edge margin.
-  confirmButton.x = static_cast<uint16_t>(BoardConfig::DISPLAY_WIDTH - 44);
-  confirmButton.y = static_cast<uint16_t>(BoardConfig::DISPLAY_HEIGHT - 26 - 2);
-  confirmButton.width = 44;
-  confirmButton.height = 26;
+  // Bigger than Back's 44x26 corner rect on purpose — this is the one button
+  // that commits the whole wizard step, and Karol reported it was too small
+  // to hit reliably with a thumb. Hit-testing widens it further still, see
+  // confirmCornerHitZone() in handleGridTap().
+  confirmButton.x = static_cast<uint16_t>(BoardConfig::DISPLAY_WIDTH - kWizardConfirmButtonWidth);
+  confirmButton.y = static_cast<uint16_t>(BoardConfig::DISPLAY_HEIGHT - kWizardConfirmButtonHeight - 2);
+  confirmButton.width = kWizardConfirmButtonWidth;
+  confirmButton.height = kWizardConfirmButtonHeight;
   confirmButton.armed = isGridItemFlashing(kWizardConfirmCanonicalIndex, millis());
   currentGridButtons_.push_back(confirmButton);
   currentGridItemIndices_.push_back(kWizardConfirmCanonicalIndex);
+}
+
+void App::applyReadingModePreviewButtonLayout() {
+  // WelcomeReadingMode only: a small eye-icon button pinned to the top-left
+  // corner (free real estate — this screen, like the other wizard pickers,
+  // has no Back tile) that opens a live preview of whichever tile
+  // (RSVP/Przewijanie) is currently highlighted. Deliberately NOT gated
+  // behind Potwierdź — see handleGridTap()'s isReadingModePreviewButton
+  // bypass — because looking at a preview isn't a decision, only actually
+  // picking RSVP vs Przewijanie is.
+  if (menuScreen_ != MenuScreen::WelcomeReadingMode) {
+    return;
+  }
+  DisplayManager::Button previewButton;
+  previewButton.icon = ui::IconId::Eye;
+  previewButton.label = "";
+  previewButton.sublabel = "";
+  previewButton.x = 0;
+  previewButton.y = 2;
+  previewButton.width = 44;
+  previewButton.height = 26;
+  previewButton.armed = isGridItemFlashing(kReadingModePreviewCanonicalIndex, millis());
+  currentGridButtons_.push_back(previewButton);
+  currentGridItemIndices_.push_back(kReadingModePreviewCanonicalIndex);
 }
 
 namespace {
@@ -4284,6 +4356,20 @@ bool App::handleGridTap(uint16_t x, uint16_t y, uint32_t nowMs) {
                                    : static_cast<uint16_t>(30);
       hitW = std::max(hitW, zoneW);
       hitH = std::max(hitH, std::min(zoneH, hitHCap));
+    } else if (button.icon == ui::IconId::Check) {
+      // Wizard Confirm corner button — same "widen the hit zone past the
+      // drawn rect" trick as Back above. Grown from the visible 70x40 box
+      // because Karol reported it was still too easy to miss with a thumb;
+      // no risk of stealing taps meant for other tiles since Confirm only
+      // ever appears alone in the bottom-right corner.
+      constexpr uint16_t kConfirmHitZoneW = 110;
+      constexpr uint16_t kConfirmHitZoneH = 60;
+      const uint16_t growW = static_cast<uint16_t>(kConfirmHitZoneW - button.width);
+      const uint16_t growH = static_cast<uint16_t>(kConfirmHitZoneH - button.height);
+      hitX = static_cast<uint16_t>(hitX - growW);
+      hitY = static_cast<uint16_t>(hitY - growH);
+      hitW = kConfirmHitZoneW;
+      hitH = kConfirmHitZoneH;
     }
 
     if (x < hitX || x >= hitX + hitW || y < hitY || y >= hitY + hitH) {
@@ -4304,13 +4390,26 @@ bool App::handleGridTap(uint16_t x, uint16_t y, uint32_t nowMs) {
     const bool isWizardConfirmButton =
         button.icon == ui::IconId::Check && canonicalIndex == kWizardConfirmCanonicalIndex;
 
+    // Reading-mode preview eye button: a pure "show me", not a decision, so
+    // it bypasses arm/confirm AND the generic flash-then-selectMenuItem()
+    // pipeline entirely (that pipeline would otherwise dispatch straight
+    // into selectWelcomeReadingModeItem() and wrongly commit+advance on a
+    // mere preview tap). Opens the preview for whichever tile is currently
+    // highlighted and returns immediately.
+    if (button.icon == ui::IconId::Eye && canonicalIndex == kReadingModePreviewCanonicalIndex) {
+      openWelcomeReadingModePreview(settingsSelectedIndex_ == 0 ? 0 : 1);
+      return true;
+    }
+
     // Confirm-gated rows (see isConfirmGatedRow()): only the wizard picker
     // screens (WelcomeLanguage/Theme/HighlightColor/ReadingMode), where a
-    // tile tap moves the highlight to one of several visible options and
-    // applying the pick happens only on the dedicated Potwierdź corner
-    // button below. Settings rows (SettingsDisplay/SettingsPacing) are
-    // plain cycle/toggle controls — nothing to preview between tap and
-    // apply — so they keep the old instant-tap behaviour below.
+    // tile tap moves the highlight to one of several visible options AND
+    // (via previewWizardPickerSelection()) applies it live so the effect is
+    // actually visible — but advancing to the next wizard step still only
+    // happens on the dedicated Potwierdź corner button below. Settings rows
+    // (SettingsDisplay/SettingsPacing) are plain cycle/toggle controls —
+    // nothing to preview between tap and apply — so they keep the old
+    // instant-tap behaviour below.
     if (isConfirmGatedRow(menuScreen_, canonicalIndex) && !isBack && !isWizardConfirmButton) {
       if (lastFiredGridItemIndex_ == static_cast<int>(canonicalIndex) &&
           lastFiredGridScreen_ == menuScreen_ &&
@@ -4319,6 +4418,7 @@ bool App::handleGridTap(uint16_t x, uint16_t y, uint32_t nowMs) {
       }
       if (canonicalIndex < itemCount) {
         *selectedIndex = canonicalIndex;
+        previewWizardPickerSelection(nowMs);
       }
       lastFiredGridItemIndex_ = static_cast<int>(canonicalIndex);
       lastFiredGridScreen_ = menuScreen_;
@@ -4980,7 +5080,8 @@ void App::scanWifiNetworks() {
   wifiNetworks_.clear();
   wifiNetworkMenuItems_.clear();
   wifiNetworkMenuItems_.push_back(
-      {wifiFlowFromWizard_ ? tr2(TrKey2::SkipForNow) : uiText(UiText::Back), ""});
+      {wifiFlowFromWizard_ ? tr2(TrKey2::SkipForNow) : uiText(UiText::Back),
+       wifiFlowFromWizard_ ? tr3(TrKey3::WifiSkipHint) : ""});
 
   if (networkCount > 0) {
     for (int i = 0; i < networkCount; ++i) {
@@ -5062,12 +5163,22 @@ void App::selectWifiNetworkItem(uint32_t nowMs) {
     const String savedPassword = findSavedWifiPassword(network.ssid);
     if (!savedPassword.isEmpty()) {
       // Already connected to this network before — reuse the remembered
-      // password instead of asking for it again.
-      preferences_.putString(kPrefWifiSsid, network.ssid);
-      preferences_.putString(kPrefWifiPass, savedPassword);
-      attemptWifiConnection(network.ssid, savedPassword, nowMs);
-      returnFromWifiFlow(nowMs);
-      return;
+      // password instead of asking for it again. Persist kPrefWifiSsid/Pass
+      // only once the connection actually succeeds — see the matching
+      // comment in commitTextEntry()'s WifiPassword case for why (a bad
+      // remembered password used to get silently re-tried forever with no
+      // way to fix it from the UI).
+      const bool connected = attemptWifiConnection(network.ssid, savedPassword, nowMs);
+      if (connected) {
+        preferences_.putString(kPrefWifiSsid, network.ssid);
+        preferences_.putString(kPrefWifiPass, savedPassword);
+        returnFromWifiFlow(nowMs);
+        return;
+      }
+      // Remembered password no longer works (network re-keyed, wrong
+      // password saved earlier, etc.) — forget it so this branch isn't
+      // taken again, then fall through to asking for a fresh password.
+      forgetSavedWifiNetwork(network.ssid);
     }
     String initialValue;
     if (configuredWifiSsid() == network.ssid) {
@@ -5265,6 +5376,17 @@ bool App::handleTextEntryTap(uint16_t x, uint16_t y, uint32_t nowMs) {
       continue;
     }
 
+    // Contact-bounce guard (see lastFiredTextEntryButtonIndex_): a physical
+    // tap that briefly loses and regains contact can reach here twice for
+    // the same key a few ms apart — this used to insert the same character
+    // (or fire Backspace/mode-switch) twice for one tap. Swallow the repeat.
+    if (lastFiredTextEntryButtonIndex_ == static_cast<int>(i) &&
+        (nowMs - lastFiredTextEntryAtMs_) < kTextEntryTapDebounceMs) {
+      return true;
+    }
+    lastFiredTextEntryButtonIndex_ = static_cast<int>(i);
+    lastFiredTextEntryAtMs_ = nowMs;
+
     // Letter/space/backspace keys get typed immediately — never delay the
     // character landing, or typing at any real speed drops keystrokes
     // whenever the next tap lands inside the still-pending flash window.
@@ -5394,13 +5516,29 @@ void App::commitTextEntry(uint32_t nowMs) {
 
       const String ssid = textEntrySession_.contextValue;
       const String password = textEntrySession_.value;
-      preferences_.putString(kPrefWifiSsid, ssid);
-      preferences_.putString(kPrefWifiPass, password);
-      rememberWifiNetwork(ssid, password);
-      textEntrySession_ = TextEntrySession();
-      textEntryButtons_.clear();
-      attemptWifiConnection(ssid, password, nowMs);
-      returnFromWifiFlow(nowMs);
+      // Persist/remember the password only once the connection actually
+      // succeeds — persisting it unconditionally (the old behaviour) meant a
+      // wrong password got saved as both the active config AND a
+      // "remembered network" before the result was known. The next tap on
+      // this SSID then took the findSavedWifiPassword() fast path in
+      // selectWifiNetworkItem() and silently retried the same wrong
+      // password forever, with no path back to the password screen.
+      const bool connected = attemptWifiConnection(ssid, password, nowMs);
+      if (connected) {
+        preferences_.putString(kPrefWifiSsid, ssid);
+        preferences_.putString(kPrefWifiPass, password);
+        rememberWifiNetwork(ssid, password);
+        textEntrySession_ = TextEntrySession();
+        textEntryButtons_.clear();
+        returnFromWifiFlow(nowMs);
+        return;
+      }
+      // Wrong password (or network briefly out of reach) — stay on this
+      // same screen with the field cleared so the user can just retype,
+      // instead of being bounced back to the network list.
+      textEntrySession_.value = "";
+      rebuildTextEntryButtons();
+      renderTextEntry();
       return;
     }
     case TextEntryPurpose::OtaOwner: {
@@ -5739,11 +5877,11 @@ void App::rebuildSettingsMenuItems() {
     settingsMenuItems_.push_back(tr3(TrKey3::ColorOrange));
     settingsMenuItems_.push_back(tr3(TrKey3::ColorPurple));
   } else if (menuScreen_ == MenuScreen::WelcomeReadingMode) {
-    // First-run wizard — krok 2.2. Sposób czytania + podgląd dla każdego.
+    // First-run wizard — krok 2.2. Sposób czytania. Podgląd każdego trybu
+    // to teraz osobna ikonka oka w rogu (applyReadingModePreviewButtonLayout()),
+    // nie osobny kafelek na liście.
     settingsMenuItems_.push_back("RSVP");
-    settingsMenuItems_.push_back(tr3(TrKey3::WelcomePreviewRsvpRow));
     settingsMenuItems_.push_back(tr3(TrKey3::WelcomeReadingModeScrollRow));
-    settingsMenuItems_.push_back(tr3(TrKey3::WelcomePreviewScrollRow));
   } else if (menuScreen_ == MenuScreen::SettingsDisplay) {
     settingsMenuItems_.push_back(uiText(UiText::Back));
     settingsMenuItems_.push_back(String(uiText(UiText::Theme)) + ": " + themeModeLabel());
@@ -6131,22 +6269,58 @@ void App::openWelcomeLanguage() {
   showGridToast(tr3(TrKey3::WelcomePowerBackHint), millis());
 }
 
-void App::selectWelcomeLanguageItem(uint32_t /*nowMs*/) {
-  // Zachowaj kolejność z rebuildSettingsMenuItems() dla WelcomeLanguage:
-  // 0 English, 1 Polski, 2 Deutsch, 3 Español, 4 Français, 5 Română.
-  // Mapujemy na UiLanguage enum (0=English, 1=Spanish, 2=French,
-  // 3=German, 4=Romanian, 5=Polish — patrz Localization.h).
-  static const uint8_t kLangByIndex[] = {0, 5, 3, 1, 2, 4};
-  if (settingsSelectedIndex_ < sizeof(kLangByIndex)) {
-    // Tak jak cycleUiLanguage: najpierw member field, potem pref.
-    uiLanguage_ = Localization::sanitizeLanguage(kLangByIndex[settingsSelectedIndex_]);
-    preferences_.putUChar(kPrefUiLanguage, static_cast<uint8_t>(uiLanguage_));
-    DeviceServicesBridge::setLanguageIndex(static_cast<int>(uiLanguage_));
-    Serial.printf("[welcome] language=%s (idx=%u → enum=%u)\n",
-                  uiLanguageLabel().c_str(),
-                  static_cast<unsigned>(settingsSelectedIndex_),
-                  static_cast<unsigned>(uiLanguage_));
+namespace {
+// Zachowaj kolejność z rebuildSettingsMenuItems() dla WelcomeLanguage:
+// 0 English, 1 Polski, 2 Deutsch, 3 Español, 4 Français, 5 Română.
+// Mapuje na UiLanguage enum (0=English, 1=Spanish, 2=French, 3=German,
+// 4=Romanian, 5=Polish — patrz Localization.h).
+const uint8_t kWelcomeLangByIndex[] = {0, 5, 3, 1, 2, 4};
+}  // namespace
+
+void App::previewWizardPickerSelection(uint32_t nowMs) {
+  // Wywoływane na KAŻDE dotknięcie kafelka na ekranach kreatora Język/Motyw/
+  // Kolor podświetlenia — stosuje wybór od razu (widać efekt na żywo), zanim
+  // Potwierdź przejdzie do kolejnego kroku. select*Item() (wywoływane przez
+  // Potwierdź) robi dokładnie to samo jeszcze raz — idempotentne z rozmysłem,
+  // żeby nie duplikować logiki apply w osobnym "pending" stanie.
+  switch (menuScreen_) {
+    case MenuScreen::WelcomeLanguage:
+      if (settingsSelectedIndex_ < sizeof(kWelcomeLangByIndex)) {
+        uiLanguage_ = Localization::sanitizeLanguage(kWelcomeLangByIndex[settingsSelectedIndex_]);
+        preferences_.putUChar(kPrefUiLanguage, static_cast<uint8_t>(uiLanguage_));
+        DeviceServicesBridge::setLanguageIndex(static_cast<int>(uiLanguage_));
+        // Tytuł ekranu i podpowiedzi PWR są tłumaczone przez tr3()/tr() —
+        // trzeba przebudować listę, żeby zobaczyć zmianę natychmiast.
+        rebuildSettingsMenuItems();
+      }
+      break;
+    case MenuScreen::WelcomeTheme: {
+      const bool dark = settingsSelectedIndex_ >= 1;
+      const bool night = settingsSelectedIndex_ == 2;
+      darkMode_ = dark;
+      nightMode_ = night;
+      preferences_.putBool(kPrefDarkMode, darkMode_);
+      preferences_.putBool(kPrefNightMode, nightMode_);
+      applyDisplayPreferences(nowMs);
+      break;
+    }
+    case MenuScreen::WelcomeHighlightColor: {
+      const uint8_t colorIndex = static_cast<uint8_t>(settingsSelectedIndex_);
+      display_.setFocusColorIndex(colorIndex);
+      preferences_.putUChar(kPrefFocusColorIndex, colorIndex);
+      break;
+    }
+    default:
+      break;
   }
+}
+
+void App::selectWelcomeLanguageItem(uint32_t nowMs) {
+  previewWizardPickerSelection(nowMs);
+  Serial.printf("[welcome] language=%s (idx=%u → enum=%u)\n",
+                uiLanguageLabel().c_str(),
+                static_cast<unsigned>(settingsSelectedIndex_),
+                static_cast<unsigned>(uiLanguage_));
   openWelcomeTheme();
 }
 
@@ -6158,19 +6332,9 @@ void App::openWelcomeTheme() {
 }
 
 void App::selectWelcomeThemeItem(uint32_t nowMs) {
-  // 0 Light, 1 Dark, 2 Night.
-  const bool dark = settingsSelectedIndex_ >= 1;
-  const bool night = settingsSelectedIndex_ == 2;
-  // KRYTYCZNE — applyDisplayPreferences czyta member fields, nie preferences.
-  // Bez ustawienia darkMode_/nightMode_ przed apply, motyw się nie zmieni.
-  // To samo robi cycleThemeMode (App.cpp:1466) — kopiujemy ten wzorzec.
-  darkMode_ = dark;
-  nightMode_ = night;
-  preferences_.putBool(kPrefDarkMode, darkMode_);
-  preferences_.putBool(kPrefNightMode, nightMode_);
+  previewWizardPickerSelection(nowMs);
   Serial.printf("[welcome] theme dark=%d night=%d\n",
                 static_cast<int>(darkMode_), static_cast<int>(nightMode_));
-  applyDisplayPreferences(nowMs);
   openWelcomeHighlightColor();
 }
 
@@ -6181,12 +6345,10 @@ void App::openWelcomeHighlightColor() {
   renderSettings();
 }
 
-void App::selectWelcomeHighlightColorItem(uint32_t /*nowMs*/) {
-  // 0=red, 1=blue, 2=green, 3=yellow, 4=orange, 5=purple
-  const uint8_t colorIndex = static_cast<uint8_t>(settingsSelectedIndex_);
-  display_.setFocusColorIndex(colorIndex);
-  preferences_.putUChar(kPrefFocusColorIndex, colorIndex);
-  Serial.printf("[welcome] highlight color=%u\n", static_cast<unsigned>(colorIndex));
+void App::selectWelcomeHighlightColorItem(uint32_t nowMs) {
+  previewWizardPickerSelection(nowMs);
+  Serial.printf("[welcome] highlight color=%u\n",
+                static_cast<unsigned>(settingsSelectedIndex_));
   openWelcomeWifi();
 }
 
@@ -6277,9 +6439,12 @@ void App::renderWelcomeLoading(uint32_t nowMs) {
   // 0->100 w pętli daje ten sam efekt "coś się dzieje" bez nowego kodu w
   // warstwie wyświetlacza.
   const int sawtoothPercent = static_cast<int>((elapsed % 2000UL) / 20UL);
-  // Skala 42/38 zamiast domyślnej 36/28 — "Ładowanie..."/"Pobieranie..." było
-  // najmniejszym tekstem w kreatorze i nieczytelne dla osób 40+.
-  display_.renderProgress("", phrase, bottomLabel, sawtoothPercent, 42, 38);
+  // Skala 64/44 — 42/38 wciąż było za małe na tym ekranie ("Odzyskaj stan
+  // Flow" itp. czytane jako "malutki druczek" mimo dużo wolnego miejsca na
+  // 640x172 ekranie); fitSerifTextScaled i tak bezpiecznie skróci z "..." dla
+  // najdłuższych tłumaczeń (np. niemiecki dolny label), więc nie ma ryzyka
+  // wyjścia poza ekran.
+  display_.renderProgress("", phrase, bottomLabel, sawtoothPercent, 64, 44);
 }
 
 // ─── Ekrany "Super!" / "Skonfigurujmy Twoje urządzenie!" ────────────────────
@@ -6335,6 +6500,10 @@ void App::openWelcomeReadingMode() {
 }
 
 void App::selectWelcomeReadingModeItem(uint32_t nowMs) {
+  // Tylko 2 kafelki (RSVP / Przewijanie) — Potwierdź zatwierdza który z nich
+  // wybrano. Podgląd każdego trybu wisi teraz jako osobna ikonka oka w rogu
+  // (applyReadingModePreviewButtonLayout()) i NIE wymaga Potwierdź, bo to
+  // tylko podgląd, nie decyzja — patrz handleGridTap().
   switch (settingsSelectedIndex_) {
     case 0:  // RSVP
       readerMode_ = ReaderMode::Rsvp;
@@ -6342,17 +6511,11 @@ void App::selectWelcomeReadingModeItem(uint32_t nowMs) {
       Serial.println("[welcome] reading mode=RSVP");
       openWelcomeConnect(nowMs);
       return;
-    case 1:  // Podgląd RSVP
-      openWelcomeReadingModePreview(0);
-      return;
-    case 2:  // Przewijanie strony
+    case 1:  // Przewijanie strony
       readerMode_ = ReaderMode::Scroll;
       preferences_.putUChar(kPrefReaderMode, static_cast<uint8_t>(readerMode_));
       Serial.println("[welcome] reading mode=Scroll");
       openWelcomeConnect(nowMs);
-      return;
-    case 3:  // Podgląd przewijania
-      openWelcomeReadingModePreview(1);
       return;
     default:
       return;

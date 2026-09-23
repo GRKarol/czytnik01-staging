@@ -144,7 +144,7 @@ inline const char *trKey2Lookup(uint8_t keyIndex, uint8_t langIndex) {
 }
 
 inline const char *trKey3Lookup(uint8_t keyIndex, uint8_t langIndex) {
-  static const char *const kTable[95][6] = {
+  static const char *const kTable[96][6] = {
       {"Save point added", "Punto guardado agregado", "Point de sauvegarde ajoute", "Lesezeichen hinzugefuegt", "Punct salvat adaugat", "Punkt zapisu dodany"},  // SavePointAdded
       {"Name bookmark", "Nombra el marcador", "Nommer le signet", "Lesezeichen benennen", "Numeste marcaj", "Nazwij zakladke"},  // NameBookmark
       {"Enter name:", "Escribe nombre:", "Entrez le nom :", "Namen eingeben:", "Introdu numele:", "Wpisz nazwe:"},  // EnterNamePrompt
@@ -240,6 +240,7 @@ inline const char *trKey3Lookup(uint8_t keyIndex, uint8_t langIndex) {
       {"Loading", "Cargando", "Chargement", "Wird geladen", "Se incarca", "Ladowanie"},  // WelcomeLoadingBottomLoading
       {"Downloading required resources", "Descargando recursos necesarios", "Telechargement des ressources necessaires", "Erforderliche Ressourcen werden heruntergeladen", "Se descarca resursele necesare", "Pobieranie potrzebnych zasobow"},  // WelcomeLoadingBottomDownloading
       {"Power button goes back a step", "El boton de encendido retrocede un paso", "Le bouton d'alimentation revient en arriere", "Netzschalter geht einen Schritt zurueck", "Butonul de pornire revine cu un pas", "Przycisk zasilania cofa o krok"},  // WelcomePowerBackHint
+      {"Optional, not recommended", "Opcional, no recomendado", "Optionnel, non recommande", "Optional, nicht empfohlen", "Optional, nerecomandat", "Opcjonalnie, niezalecane"},  // WifiSkipHint
   };
   return kTable[keyIndex][langIndex];
 }

@@ -11,6 +11,7 @@
 
 #include "sync/WifiQrCode.h"
 #include "ble/BleApi.h"
+#include "update/OtaUpdater.h"
 #include <qrcode.h>
 
 // Global BLE API pointer — set by App during init, used by CompanionSyncManager
@@ -611,12 +612,16 @@ void CompanionSyncManager::update() {
 void CompanionSyncManager::end() {
   stopServer();
 
+  // Same mutex as startAccessPoint() above — this teardown races the exact
+  // same background download tasks the same way.
+  xSemaphoreTake(wifiSessionMutex(), portMAX_DELAY);
   if (networkMode_ == NetworkMode::Station) {
     WiFi.disconnect(true, false);
   } else if (networkMode_ == NetworkMode::AccessPoint) {
     WiFi.softAPdisconnect(true);
   }
   WiFi.mode(WIFI_OFF);
+  xSemaphoreGive(wifiSessionMutex());
   preferences_.end();
 
   networkMode_ = NetworkMode::None;
@@ -815,8 +820,18 @@ bool CompanionSyncManager::startAccessPoint() {
   statusLine1_ = "Sync Wi-Fi";
   statusLine2_ = ssid;
   networkSsid_ = ssid;
+  // Same WiFi-driver mutex OtaUpdater::connectWiFi()/disconnectWiFi() use —
+  // without it, entering this screen while a font/book background download
+  // (started earlier in the wizard) still holds an active STA/TLS session on
+  // the other core raced WiFi.mode(WIFI_AP) against that session's own
+  // WiFi.mode() calls, crashing with the same LoadProhibited PANIC that hit
+  // the STA-side teardown race (see wifiSessionMutex()'s doc comment) — the
+  // reboot-back-to-language-screen bug on "Connect your reader to the app".
+  xSemaphoreTake(wifiSessionMutex(), portMAX_DELAY);
   WiFi.mode(WIFI_AP);
-  if (!WiFi.softAP(ssid.c_str())) {
+  const bool apStarted = WiFi.softAP(ssid.c_str());
+  xSemaphoreGive(wifiSessionMutex());
+  if (!apStarted) {
     Serial.println("[sync] softAP failed");
     return false;
   }
