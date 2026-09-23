@@ -12,6 +12,8 @@
 #endif
 
 #include <driver/sdmmc_types.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 class UsbMassStorageManager {
  public:
@@ -52,4 +54,10 @@ class UsbMassStorageManager {
   bool ejected_ = false;
   bool writeEnabled_ = false;
   const char *statusMessage_ = "Idle";
+  // Guards card_/sectorBuffer_ against the exit path (end()/endSdCard(), run
+  // from the main app task) racing a read/write callback that TinyUSB is
+  // still running on its own task — without this, touching "back" mid-
+  // transfer could free the DMA buffer and deinit the SD host while a
+  // callback was mid-memcpy, hanging or crashing the device.
+  SemaphoreHandle_t ioMutex_ = nullptr;
 };

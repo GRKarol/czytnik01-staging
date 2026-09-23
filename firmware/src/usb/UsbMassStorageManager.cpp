@@ -50,6 +50,7 @@ UsbMassStorageManager *UsbMassStorageManager::instance_ = nullptr;
 
 UsbMassStorageManager::UsbMassStorageManager() {
   instance_ = this;
+  ioMutex_ = xSemaphoreCreateMutex();
   configureMsc();
 }
 
@@ -95,11 +96,22 @@ void UsbMassStorageManager::end() {
   msc_.mediaPresent(false);
   msc_.end();
 #endif
+  // Wait for any read/write callback TinyUSB is currently running on its own
+  // task to finish before we free the DMA buffer and deinit the SD host —
+  // otherwise exiting mid-transfer (e.g. touch-to-exit while the host is
+  // still writing) frees memory a callback is actively using, which hangs
+  // or crashes the device instead of exiting.
+  if (ioMutex_ != nullptr && xSemaphoreTake(ioMutex_, pdMS_TO_TICKS(2000)) != pdTRUE) {
+    Serial.println("[usb-msc] end() timed out waiting for in-flight I/O; forcing teardown");
+  }
   endSdCard();
   active_ = false;
   ejected_ = false;
   writeEnabled_ = false;
   statusMessage_ = "Idle";
+  if (ioMutex_ != nullptr) {
+    xSemaphoreGive(ioMutex_);
+  }
 }
 
 bool UsbMassStorageManager::active() const { return active_; }
@@ -242,6 +254,13 @@ int32_t UsbMassStorageManager::readSectors(uint32_t lba, uint32_t offset, void *
       offset >= blockSize_) {
     return -1;
   }
+  if (ioMutex_ == nullptr || xSemaphoreTake(ioMutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
+    return -1;
+  }
+  if (!active_ || !cardReady_ || sectorBuffer_ == nullptr) {
+    xSemaphoreGive(ioMutex_);
+    return -1;
+  }
 
   uint8_t *out = static_cast<uint8_t *>(buffer);
   uint32_t copied = 0;
@@ -255,6 +274,7 @@ int32_t UsbMassStorageManager::readSectors(uint32_t lba, uint32_t offset, void *
     if (err != ESP_OK) {
       Serial.printf("[usb-msc] read failed lba=%lu err=0x%x\n",
                     static_cast<unsigned long>(currentLba), err);
+      xSemaphoreGive(ioMutex_);
       return copied > 0 ? static_cast<int32_t>(copied) : -1;
     }
 
@@ -264,6 +284,7 @@ int32_t UsbMassStorageManager::readSectors(uint32_t lba, uint32_t offset, void *
     ++currentLba;
   }
 
+  xSemaphoreGive(ioMutex_);
   return static_cast<int32_t>(copied);
 }
 
@@ -274,6 +295,13 @@ int32_t UsbMassStorageManager::writeSectors(uint32_t lba, uint32_t offset, uint8
   }
   if (!active_ || !cardReady_ || buffer == nullptr || sectorBuffer_ == nullptr ||
       offset >= blockSize_) {
+    return -1;
+  }
+  if (ioMutex_ == nullptr || xSemaphoreTake(ioMutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
+    return -1;
+  }
+  if (!active_ || !cardReady_ || sectorBuffer_ == nullptr) {
+    xSemaphoreGive(ioMutex_);
     return -1;
   }
 
@@ -289,6 +317,7 @@ int32_t UsbMassStorageManager::writeSectors(uint32_t lba, uint32_t offset, uint8
       if (readErr != ESP_OK) {
         Serial.printf("[usb-msc] write pre-read failed lba=%lu err=0x%x\n",
                       static_cast<unsigned long>(currentLba), readErr);
+        xSemaphoreGive(ioMutex_);
         return written > 0 ? static_cast<int32_t>(written) : -1;
       }
     }
@@ -299,6 +328,7 @@ int32_t UsbMassStorageManager::writeSectors(uint32_t lba, uint32_t offset, uint8
     if (writeErr != ESP_OK) {
       Serial.printf("[usb-msc] write failed lba=%lu err=0x%x\n",
                     static_cast<unsigned long>(currentLba), writeErr);
+      xSemaphoreGive(ioMutex_);
       return written > 0 ? static_cast<int32_t>(written) : -1;
     }
 
@@ -307,6 +337,7 @@ int32_t UsbMassStorageManager::writeSectors(uint32_t lba, uint32_t offset, uint8
     ++currentLba;
   }
 
+  xSemaphoreGive(ioMutex_);
   return static_cast<int32_t>(written);
 }
 
