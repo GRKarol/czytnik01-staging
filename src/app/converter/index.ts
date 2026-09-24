@@ -4,8 +4,18 @@ import { parseTxt, parseMarkdown, parseHtml } from "./text-formats";
 import { parseEpub } from "./epub";
 import { parsePdf } from "./pdf";
 import { parseMobi } from "./mobi";
+import { parseDocx } from "./docx";
 
-export type SupportedFormat = "txt" | "md" | "html" | "epub" | "pdf" | "mobi" | "azw" | "azw3";
+export type SupportedFormat =
+  | "txt"
+  | "md"
+  | "html"
+  | "epub"
+  | "pdf"
+  | "mobi"
+  | "azw"
+  | "azw3"
+  | "docx";
 
 const SUPPORTED_EXT: Record<string, SupportedFormat> = {
   txt: "txt",
@@ -21,6 +31,7 @@ const SUPPORTED_EXT: Record<string, SupportedFormat> = {
   mobi: "mobi",
   azw: "azw",
   azw3: "azw3",
+  docx: "docx",
 };
 
 export interface DetectionResult {
@@ -50,6 +61,8 @@ export async function parseFile(file: File, format: SupportedFormat): Promise<Pa
     case "azw":
     case "azw3":
       return parseMobi(file);
+    case "docx":
+      return parseDocx(file);
   }
 }
 

@@ -25,6 +25,7 @@
     "esp-web-tools": "^10.1.0",
     "jszip": "^3.10.1",
     "lit": "^3.2.0",
+    "mammoth": "^1.12.3",
     "pdfjs-dist": "^5.7.284"
   },
   "devDependencies": {
