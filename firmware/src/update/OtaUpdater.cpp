@@ -4,6 +4,7 @@
 
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
+#include <Preferences.h>
 #include <SD_MMC.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -37,6 +38,74 @@ constexpr const char *kConfigPaths[] = {
 };
 constexpr uint32_t kWifiConnectTimeoutMs = 15000;
 constexpr uint32_t kWifiConnectPollMs = 250;
+constexpr const char *kFlowerHostname = "Flower-Edition-1";
+// Mirrors App.cpp's remembered-networks ring (same "rsvp" NVS namespace) so
+// a background OTA check can fall back to any known network that's
+// currently in range, not only the one last connected to.
+constexpr const char *kWifiPrefsNamespace = "rsvp";
+constexpr const char *kSavedWifiSsidPrefix = "wnet_s";
+constexpr const char *kSavedWifiPassPrefix = "wnet_p";
+constexpr const char *kPrimaryWifiSsidKey = "wifi_ssid";
+constexpr const char *kPrimaryWifiPassKey = "wifi_pass";
+constexpr size_t kMaxSavedWifiNetworks = 5;
+constexpr uint32_t kFallbackWifiConnectTimeoutMs = 8000;
+
+// Scans for nearby networks and tries each remembered SSID that's actually
+// in range (skipping the one that was already tried and failed). On success
+// promotes the connected network to the primary wifi_ssid/wifi_pass slot so
+// the fast path picks it first next time.
+bool tryConnectAnySavedWifi(const String &alreadyTried, String &connectedSsidOut) {
+  WiFi.disconnect(false, false);
+  delay(50);
+  const int networkCount = WiFi.scanNetworks(false, true);
+  if (networkCount <= 0) {
+    WiFi.scanDelete();
+    return false;
+  }
+
+  Preferences prefs;
+  if (!prefs.begin(kWifiPrefsNamespace, /*readOnly=*/true)) {
+    WiFi.scanDelete();
+    return false;
+  }
+
+  bool connected = false;
+  for (size_t slot = 0; slot < kMaxSavedWifiNetworks && !connected; ++slot) {
+    const String ssid = prefs.getString((String(kSavedWifiSsidPrefix) + String(slot)).c_str(), "");
+    if (ssid.isEmpty() || ssid == alreadyTried) {
+      continue;
+    }
+    bool inRange = false;
+    for (int i = 0; i < networkCount; ++i) {
+      if (WiFi.SSID(i) == ssid) {
+        inRange = true;
+        break;
+      }
+    }
+    if (!inRange) {
+      continue;
+    }
+    const String password = prefs.getString((String(kSavedWifiPassPrefix) + String(slot)).c_str(), "");
+    WiFi.begin(ssid.c_str(), password.c_str());
+    const uint32_t startMs = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startMs < kFallbackWifiConnectTimeoutMs) {
+      delay(kWifiConnectPollMs);
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      connected = true;
+      connectedSsidOut = ssid;
+      Preferences writePrefs;
+      if (writePrefs.begin(kWifiPrefsNamespace, false)) {
+        writePrefs.putString(kPrimaryWifiSsidKey, ssid);
+        writePrefs.putString(kPrimaryWifiPassKey, password);
+        writePrefs.end();
+      }
+    }
+  }
+  prefs.end();
+  WiFi.scanDelete();
+  return connected;
+}
 constexpr size_t kMaxReleaseJsonBytes = 32768;
 constexpr const char *kStatusTitle = "OTA";
 const char *kRedirectHeaderKeys[] = {
@@ -321,6 +390,7 @@ bool OtaUpdater::connectWiFi(const Config &config, StatusCallback callback,
   WiFi.persistent(false);
   WiFi.setAutoReconnect(false);
   WiFi.mode(WIFI_STA);
+  WiFi.setHostname(kFlowerHostname);
   WiFi.begin(config.wifiSsid.c_str(), config.wifiPassword.c_str());
 
   const uint32_t startMs = millis();
@@ -331,7 +401,15 @@ bool OtaUpdater::connectWiFi(const Config &config, StatusCallback callback,
     delay(kWifiConnectPollMs);
   }
 
-  const bool connected = WiFi.status() == WL_CONNECTED;
+  bool connected = WiFi.status() == WL_CONNECTED;
+  if (!connected) {
+    // Primary network isn't in range or its saved password is stale — try
+    // any other network we know about that's actually visible right now
+    // (e.g. the reader travelled back into range of a previously-used Wi-Fi).
+    reportStatus(callback, context, kStatusTitle, "Trying known Wi-Fi", "", 12);
+    String fallbackSsid;
+    connected = tryConnectAnySavedWifi(config.wifiSsid, fallbackSsid);
+  }
   if (!connected) {
     // Sesja się nie zaczęła, ale WiFi.begin() już uruchomił sterownik —
     // trzeba go zgasić tutaj, POD mutexem, zanim go zwolnimy. Wcześniej ten

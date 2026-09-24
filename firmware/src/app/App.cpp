@@ -331,6 +331,9 @@ constexpr size_t kSettingsDisplayLanguageIndex = 11;
 constexpr size_t kSettingsDisplayFocusColorIndex = 12;
 constexpr size_t kSettingsDisplayHelpHintsIndex = 13;
 constexpr size_t kSettingsDisplayNavModeIndex = 14;
+// Appended at the end, not next to kSettingsDisplaySavePointBtnIndex, to
+// avoid reshuffling every other index in this list.
+constexpr size_t kSettingsDisplaySavePointNameModeIndex = 15;
 constexpr size_t kSettingsPacingReadingModeIndex = 1;
 constexpr size_t kSettingsPacingPauseModeIndex = 2;
 constexpr size_t kSettingsPacingWpmIndex = 3;
@@ -400,6 +403,7 @@ constexpr const char *kPrefReaderBatteryVisible = "read_bat";
 constexpr const char *kPrefReaderChapterVisible = "read_ch";
 constexpr const char *kPrefReaderProgressVisible = "read_pct";
 constexpr const char *kPrefSavePointButtonVisible = "sp_btn";
+constexpr const char *kPrefSavePointCustomName = "sp_name_cust";
 constexpr const char *kPrefReaderFontSize = "font_size";
 constexpr const char *kPrefReaderTypeface = "typeface";
 constexpr const char *kPrefTypographyFocusHighlight = "type_hlt";
@@ -859,6 +863,8 @@ void App::begin() {
       preferences_.getBool(kPrefReaderProgressVisible, readerProgressVisibleWhilePlaying_);
   savePointButtonVisible_ =
       preferences_.getBool(kPrefSavePointButtonVisible, savePointButtonVisible_);
+  savePointUseCustomName_ =
+      preferences_.getBool(kPrefSavePointCustomName, savePointUseCustomName_);
   showHelpHints_ = preferences_.getBool(kPrefShowHelpHints, showHelpHints_);
   {
     navMode_ = navModeFromSetting(
@@ -1301,8 +1307,8 @@ void App::update(uint32_t nowMs) {
       // polaczenie..." az do nastepnego niepowiazanego przerysowania —
       // "Polaczono!" pojawialo sie dopiero przypadkiem, czasem naklejone
       // na uklad liczony jeszcze dla poprzedniego stanu ekranu.
-      if (menuScreen_ == MenuScreen::WelcomeConnect) {
-        renderWelcomeConnect();
+      if (menuScreen_ == MenuScreen::WelcomeAppPairing) {
+        renderWelcomeAppPairing();
       }
     }
     if (!autoSyncClientConnected_ && (nowMs - autoSyncStartedMs_ >= 30000)) {
@@ -1838,6 +1844,8 @@ void App::toggleMenuFromPowerButton(uint32_t nowMs) {
         return;
       }
       if (menuScreen_ == MenuScreen::WelcomeConnect ||
+          menuScreen_ == MenuScreen::WelcomeAppPairing ||
+          menuScreen_ == MenuScreen::WelcomeConfigureInApp ||
           menuScreen_ == MenuScreen::WelcomeTheme ||
           menuScreen_ == MenuScreen::WelcomeHighlightColor ||
           menuScreen_ == MenuScreen::WelcomeLoading ||
@@ -1959,6 +1967,8 @@ void App::reloadRuntimePreferences(uint32_t nowMs, bool rerender) {
       preferences_.getBool(kPrefReaderProgressVisible, readerProgressVisibleWhilePlaying_);
   savePointButtonVisible_ =
       preferences_.getBool(kPrefSavePointButtonVisible, savePointButtonVisible_);
+  savePointUseCustomName_ =
+      preferences_.getBool(kPrefSavePointCustomName, savePointUseCustomName_);
   showHelpHints_ = preferences_.getBool(kPrefShowHelpHints, showHelpHints_);
   {
     navMode_ = navModeFromSetting(
@@ -2864,14 +2874,18 @@ void App::applyPausedTouchGesture(const TouchEvent &event, uint32_t nowMs) {
           }
           saveReadingPosition(true);
           const String defaultName = savePointDefaultName();
-          menuScreen_ = MenuScreen::Main;
-          setState(AppState::Menu, nowMs);
           savePointQuickSaveFromReader_ = true;
-          openTextEntry(TextEntryPurpose::SavePointName,
-                        tr3(TrKey3::NameBookmark),
-                        tr3(TrKey3::EnterNamePrompt),
-                        "", defaultName, "", false, 30,
-                        MenuScreen::SavePointsList);
+          if (savePointUseCustomName_) {
+            menuScreen_ = MenuScreen::Main;
+            setState(AppState::Menu, nowMs);
+            openTextEntry(TextEntryPurpose::SavePointName,
+                          tr3(TrKey3::NameBookmark),
+                          tr3(TrKey3::EnterNamePrompt),
+                          "", defaultName, "", false, 30,
+                          MenuScreen::SavePointsList);
+          } else {
+            finishSavePointCreation(defaultName, nowMs);
+          }
           return;
         }
         if (playLocked_ || pauseAtSentenceEndRequested_) {
@@ -2965,14 +2979,18 @@ void App::applyPausedTouchGesture(const TouchEvent &event, uint32_t nowMs) {
       resetReaderTapTracking();
       saveReadingPosition(true);
       const String defaultName = savePointDefaultName();
-      menuScreen_ = MenuScreen::Main;
-      setState(AppState::Menu, nowMs);
       savePointQuickSaveFromReader_ = true;
-      openTextEntry(TextEntryPurpose::SavePointName,
-                    tr3(TrKey3::NameBookmark),
-                    tr3(TrKey3::EnterNamePrompt),
-                    "", defaultName, "", false, 30,
-                    MenuScreen::SavePointsList);
+      if (savePointUseCustomName_) {
+        menuScreen_ = MenuScreen::Main;
+        setState(AppState::Menu, nowMs);
+        openTextEntry(TextEntryPurpose::SavePointName,
+                      tr3(TrKey3::NameBookmark),
+                      tr3(TrKey3::EnterNamePrompt),
+                      "", defaultName, "", false, 30,
+                      MenuScreen::SavePointsList);
+      } else {
+        finishSavePointCreation(defaultName, nowMs);
+      }
       return;
     }
     if (tapLike && previewBrowseMode) {
@@ -3169,19 +3187,30 @@ void App::applyMenuTouchGesture(const TouchEvent &event, uint32_t nowMs) {
     return;
   }
 
-  // Krok "Połącz z telefonem" i ekrany "Super!"/"Skonfigurujmy" nie mają
-  // listy ani siatki przycisków — cały ekran jest jednym przyciskiem
-  // "Dalej" (Super/ConfigureIntro dodatkowo auto-advance po 3s). Górny-lewy
-  // róg (ten sam 40x40 obszar co ikona Back w renderStatus/renderStatusWithQr
-  // i co przycisk Wróć w tutorialu wyżej) cofa o krok zamiast iść dalej —
+  // Kroki "Pobierz appkę"/"Połączenie z aplikacją"/"Skonfiguruj w aplikacji"
+  // i ekrany "Super!"/"Skonfigurujmy" nie mają listy ani siatki przycisków —
+  // cały ekran jest jednym przyciskiem "Dalej" (Super/ConfigureIntro/
+  // ConfigureInApp dodatkowo auto-advance po 3s). Górny-lewy róg (ten sam
+  // 40x40 obszar co ikona Back w renderStatus/renderStatusWithQr i co
+  // przycisk Wróć w tutorialu wyżej) cofa o krok zamiast iść dalej —
   // wcześniej jedynym sposobem cofnięcia stąd był fizyczny przycisk PWR.
-  if (menuScreen_ == MenuScreen::WelcomeConnect || menuScreen_ == MenuScreen::WelcomeSuper ||
+  if (menuScreen_ == MenuScreen::WelcomeConnect || menuScreen_ == MenuScreen::WelcomeAppPairing ||
+      menuScreen_ == MenuScreen::WelcomeConfigureInApp || menuScreen_ == MenuScreen::WelcomeSuper ||
       menuScreen_ == MenuScreen::WelcomeConfigureIntro) {
     if (absDeltaX <= static_cast<int>(kTapSlopPx) && absDeltaY <= static_cast<int>(kTapSlopPx)) {
       if (event.x < 40 && event.y < 40) {
         wizardStepBack(nowMs);
-      } else if (menuScreen_ == MenuScreen::WelcomeConnect) {
+      } else if (menuScreen_ == MenuScreen::WelcomeConnect &&
+                 (!welcomeConnectQrAvailable() || isWizardNextCornerTap(event.x, event.y))) {
+        // With a QR on screen, only the corner "Next" (after the 5s look-
+        // at-the-code delay) advances — see selectWelcomeConnectTap(). If
+        // QR generation failed there's no corner button to gate on, so the
+        // whole screen stays tap-through like every other step here.
         selectWelcomeConnectTap(nowMs);
+      } else if (menuScreen_ == MenuScreen::WelcomeAppPairing) {
+        selectWelcomeAppPairingTap(nowMs);
+      } else if (menuScreen_ == MenuScreen::WelcomeConfigureInApp) {
+        openWelcomeBookPicker(nowMs);
       }
     }
     return;
@@ -4240,6 +4269,10 @@ void App::annotateSettingsDisplayButton(DisplayManager::Button &button,
       button.kind = DisplayManager::Button::ButtonKind::Toggle;
       button.active = savePointButtonVisible_;
       break;
+    case kSettingsDisplaySavePointNameModeIndex:
+      button.kind = DisplayManager::Button::ButtonKind::Toggle;
+      button.active = savePointUseCustomName_;
+      break;
     case kSettingsDisplayHelpHintsIndex:
       button.kind = DisplayManager::Button::ButtonKind::Toggle;
       button.active = showHelpHints_;
@@ -4534,8 +4567,18 @@ void App::selectMenuItem(uint32_t nowMs) {
   if (menuScreen_ == MenuScreen::WelcomeConnect) {
     // Cały ekran to jeden przycisk "Dalej" — bez tego wejścia potwierdzenie
     // z D-Pada/przycisku wpadłoby w switch menu głównego i wyrzuciło
-    // użytkownika z kreatora.
-    selectWelcomeConnectTap(nowMs);
+    // użytkownika z kreatora. D-Pad confirm bypasses the 5s look-first
+    // delay on purpose — it's a deliberate button press, not an accidental
+    // screen tap.
+    openWelcomeAppPairing(nowMs);
+    return;
+  }
+  if (menuScreen_ == MenuScreen::WelcomeAppPairing) {
+    selectWelcomeAppPairingTap(nowMs);
+    return;
+  }
+  if (menuScreen_ == MenuScreen::WelcomeConfigureInApp) {
+    openWelcomeBookPicker(nowMs);
     return;
   }
   if (menuScreen_ == MenuScreen::WelcomeReadingModePreview) {
@@ -4879,6 +4922,13 @@ void App::selectSettingsItem(uint32_t nowMs) {
       case kSettingsDisplaySavePointBtnIndex:
         savePointButtonVisible_ = !savePointButtonVisible_;
         preferences_.putBool(kPrefSavePointButtonVisible, savePointButtonVisible_);
+        rebuildSettingsMenuItems();
+        showGridToast(settingsMenuItems_[settingsSelectedIndex_], nowMs);
+        renderSettings();
+        return;
+      case kSettingsDisplaySavePointNameModeIndex:
+        savePointUseCustomName_ = !savePointUseCustomName_;
+        preferences_.putBool(kPrefSavePointCustomName, savePointUseCustomName_);
         rebuildSettingsMenuItems();
         showGridToast(settingsMenuItems_[settingsSelectedIndex_], nowMs);
         renderSettings();
@@ -5565,37 +5615,7 @@ void App::commitTextEntry(uint32_t nowMs) {
       }
       textEntrySession_ = TextEntrySession();
       textEntryButtons_.clear();
-
-      if (usingStorageBook_ && !currentBookPath_.isEmpty()) {
-        SavePoint sp;
-        sp.bookPath = currentBookPath_;
-        sp.bookTitle = currentBookTitle_;
-        sp.wordIndex = reader_.currentIndex();
-        sp.progressPercent = readingProgressPercent();
-        sp.name = name;
-        loadSavePoints();
-        savePoints_.insert(savePoints_.begin(), sp);
-        if (savePoints_.size() > kMaxSavePoints) {
-          savePoints_.pop_back();
-        }
-        persistSavePoints();
-        Serial.printf("[save-point] created: %s word=%u\n", sp.name.c_str(),
-                      static_cast<unsigned int>(sp.wordIndex));
-        display_.renderStatus(uiText(UiText::SavePoints),
-                              tr3(TrKey3::BookmarkAdded), name);
-        delay(1200);
-      }
-      flushStaleTouch();
-      if (savePointQuickSaveFromReader_) {
-        // Quick-save from the reader: go back to reading, not to the
-        // SavePointsList menu — the point was already saved, the user
-        // wants to keep reading, not browse their bookmarks.
-        savePointQuickSaveFromReader_ = false;
-        menuScreen_ = MenuScreen::Main;
-        setState(AppState::Paused, nowMs);
-        return;
-      }
-      openSavePointsList();
+      finishSavePointCreation(name, nowMs);
       return;
     }
     case TextEntryPurpose::PresetName: {
@@ -5907,6 +5927,8 @@ void App::rebuildSettingsMenuItems() {
     settingsMenuItems_.push_back(String(tr3(TrKey3::HelpQColon)) +
                                  onOffLabel(showHelpHints_));
     settingsMenuItems_.push_back(String(tr3(TrKey3::NavigationColon)) + navModeLabel());
+    settingsMenuItems_.push_back(String(tr3(TrKey3::SavePointNameModeColon)) +
+                                 savePointNameModeLabel());
   } else if (menuScreen_ == MenuScreen::ScreensaverSettings) {
     settingsMenuItems_.push_back(uiText(UiText::Back));
     settingsMenuItems_.push_back(String(tr(TrKey::ScreensaverStyle)) +
@@ -6256,7 +6278,17 @@ constexpr uint32_t kWelcomeLoadingMinMs = 15000;
 constexpr uint32_t kWelcomeLoadingMaxMs = 25000;
 constexpr uint32_t kWelcomeTimedMessageMs = 3000;
 constexpr uint32_t kWelcomeScreenFrameMs = 150;
+// Forces a look at the download QR before the corner "Next" appears —
+// see App::renderWelcomeConnect()/isWizardNextCornerTap().
+constexpr uint32_t kWelcomeConnectNextDelayMs = 5000;
+// Must match the box DisplayManager::renderStatusWithQr() draws for
+// cornerHint (70x20 at a 4px margin) — widened a little for an easier tap,
+// same idea as the wizard Confirm button's oversized hit zone.
+constexpr int kWizardNextCornerX = BoardConfig::DISPLAY_WIDTH - 90;
+constexpr int kWizardNextCornerY = BoardConfig::DISPLAY_HEIGHT - 30;
 }  // namespace
+
+bool App::welcomeConnectQrAvailable() const { return g_installAppQrSize > 0; }
 
 void App::openWelcomeLanguage() {
   menuScreen_ = MenuScreen::WelcomeLanguage;
@@ -6473,7 +6505,16 @@ void App::updateWelcomeTimedScreens(uint32_t nowMs) {
     updateWelcomeLoading(nowMs);
     return;
   }
-  if (menuScreen_ != MenuScreen::WelcomeSuper && menuScreen_ != MenuScreen::WelcomeConfigureIntro) {
+  if (menuScreen_ == MenuScreen::WelcomeConnect) {
+    // Re-render every tick so the corner "Next" button appears exactly
+    // once the 5s look-first delay passes, with no extra input needed —
+    // see renderWelcomeConnect(). Cheap: DisplayManager's render-key cache
+    // skips the actual redraw except right at that 5s edge.
+    renderWelcomeConnect();
+    return;
+  }
+  if (menuScreen_ != MenuScreen::WelcomeSuper && menuScreen_ != MenuScreen::WelcomeConfigureIntro &&
+      menuScreen_ != MenuScreen::WelcomeConfigureInApp) {
     return;
   }
   if (nowMs - welcomeScreenEnteredMs_ < kWelcomeTimedMessageMs) {
@@ -6481,12 +6522,16 @@ void App::updateWelcomeTimedScreens(uint32_t nowMs) {
   }
   if (menuScreen_ == MenuScreen::WelcomeSuper) {
     openWelcomeConfigureIntro(nowMs);
-  } else {
+  } else if (menuScreen_ == MenuScreen::WelcomeConfigureIntro) {
     // Krok 2.1 — reużywamy cały ekran/handler TypographyFontPicker; flaga
     // mówi selectTypographyFontPickerItem() żeby po wyborze wrócić do
     // następnego kroku kreatora zamiast do TypographyTuning.
     wizardFontPickerActive_ = true;
     openTypographyFontPicker();
+  } else {
+    // WelcomeConfigureInApp — "Skonfiguruj w aplikacji" auto-advances into
+    // the starter-library picker just like Super/ConfigureIntro do.
+    openWelcomeBookPicker(nowMs);
   }
 }
 
@@ -6639,11 +6684,52 @@ void App::renderWelcomeReadingModePreview() {
 // ─── Krok 2.3: połącz z telefonem (QR + parowanie AP) ───────────────────────
 
 void App::openWelcomeConnect(uint32_t nowMs) {
-  (void)nowMs;
   menuScreen_ = MenuScreen::WelcomeConnect;
+  welcomeScreenEnteredMs_ = nowMs;
   renderWelcomeConnect();
+}
 
-  // Start AP if not already running from auto-sync
+void App::renderWelcomeConnect() {
+  ensureInstallAppQr();
+  // First 5s: just the QR, no tap-through — give the user a chance to
+  // actually point their camera at it before offering a way past it. See
+  // isWizardNextCornerTap() for the matching touch hit-test.
+  const bool showNext = millis() - welcomeScreenEnteredMs_ >= kWelcomeConnectNextDelayMs;
+  const String cornerHint = showNext ? tr3(TrKey3::NextLabel) : "";
+  if (g_installAppQrSize > 0) {
+    // No waiting/connected hint here anymore — that's the pairing screen's
+    // job now (renderWelcomeAppPairing()), not this download-only step.
+    display_.renderStatusWithQr(tr3(TrKey3::WelcomeConnectTitle), tr3(TrKey3::WelcomeConnectLine1),
+                                g_installAppQrData, g_installAppQrSize, "", cornerHint);
+  } else {
+    // QR generation failed (rare) — no corner button to gate on, so the
+    // whole screen stays a single tap-through like it always was.
+    display_.renderStatus(tr3(TrKey3::WelcomeConnectTitle), kInstallAppUrl, "");
+  }
+}
+
+bool App::isWizardNextCornerTap(uint16_t x, uint16_t y) const {
+  return x >= kWizardNextCornerX && y >= kWizardNextCornerY;
+}
+
+void App::selectWelcomeConnectTap(uint32_t nowMs) {
+  if (g_installAppQrSize > 0 && millis() - welcomeScreenEnteredMs_ < kWelcomeConnectNextDelayMs) {
+    // Corner button isn't showing yet — ignore, this screen only advances
+    // via that corner or (fallback, no QR at all) a tap anywhere.
+    return;
+  }
+  openWelcomeAppPairing(nowMs);
+}
+
+void App::openWelcomeAppPairing(uint32_t nowMs) {
+  menuScreen_ = MenuScreen::WelcomeAppPairing;
+  welcomeScreenEnteredMs_ = nowMs;
+  renderWelcomeAppPairing();
+
+  // Start AP + BLE pairing if not already running from auto-sync — moved
+  // here (was in openWelcomeConnect()) so the radios only come on once the
+  // user is actually looking at the pairing QR, not while they're still
+  // reading the app-download screen.
   if (!autoSyncActive_ && !companionSync_.active()) {
     CompanionSyncManager::Config syncConfig;
     syncConfig.wifiSsid = "";
@@ -6655,30 +6741,36 @@ void App::openWelcomeConnect(uint32_t nowMs) {
       Serial.println("[welcome] started AP for phone pairing");
     }
   }
+  if (!ble_.isActive()) {
+    ble_.begin(this);
+    Serial.printf("[welcome] BLE turned on for phone pairing (name=%s)\n",
+                  ble_.deviceName().c_str());
+  }
 }
 
-void App::renderWelcomeConnect() {
-  ensureInstallAppQr();
+void App::renderWelcomeAppPairing() {
   const String hint = autoSyncClientConnected_ ? tr3(TrKey3::WelcomeConnectHintConnected)
                                                 : tr3(TrKey3::WelcomeConnectHintWaiting);
-  if (g_installAppQrSize > 0) {
-    display_.renderStatusWithQr(tr3(TrKey3::WelcomeConnectTitle), tr3(TrKey3::WelcomeConnectLine1),
-                                g_installAppQrData, g_installAppQrSize, hint);
+  if (companionSync_.hasQrCode()) {
+    // statusLine1() is the AP's SSID once begin() finishes (see its own
+    // startAccessPoint()-then-overwrite sequence) — the same value the
+    // Ustawienia > Sync screen shows next to this exact QR.
+    display_.renderStatusWithQr(tr3(TrKey3::WelcomeAppPairingTitle), companionSync_.statusLine1(),
+                                companionSync_.qrCodeData(), companionSync_.qrCodeSize(), hint);
   } else {
-    display_.renderStatus(tr3(TrKey3::WelcomeConnectTitle), kInstallAppUrl, hint);
+    display_.renderStatus(tr3(TrKey3::WelcomeAppPairingTitle), companionSync_.statusLine1(), hint);
   }
 }
 
-void App::selectWelcomeConnectTap(uint32_t nowMs) {
-  // Cały ekran to jeden przycisk "Dalej" — jeśli telefon jeszcze się nie
-  // połączył traktujemy tap jak "pomiń", żeby nigdy nie zostawić użytkownika
-  // bez dotykowego wyjścia z tego ekranu.
-  if (autoSyncActive_ && !autoSyncClientConnected_) {
-    companionSync_.end();
-    autoSyncActive_ = false;
-    Serial.println("[welcome] user left phone connect step, AP stopped");
-  }
-  openWelcomeBookPicker(nowMs);
+void App::selectWelcomeAppPairingTap(uint32_t nowMs) {
+  openWelcomeConfigureInApp(nowMs);
+}
+
+void App::openWelcomeConfigureInApp(uint32_t nowMs) {
+  menuScreen_ = MenuScreen::WelcomeConfigureInApp;
+  welcomeScreenEnteredMs_ = nowMs;
+  renderWelcomeTimedMessage(tr3(TrKey3::WelcomeConfigureInAppLine1),
+                            tr3(TrKey3::WelcomeConfigureInAppLine2));
 }
 
 // ─── Krok 2.4: "Prawie gotowe! Co dziś czytamy?" ────────────────────────────
@@ -6749,6 +6841,12 @@ void App::wizardStepBack(uint32_t nowMs) {
     case MenuScreen::WelcomeConnect:
       openWelcomeReadingMode();
       return;
+    case MenuScreen::WelcomeAppPairing:
+      openWelcomeConnect(nowMs);
+      return;
+    case MenuScreen::WelcomeConfigureInApp:
+      openWelcomeAppPairing(nowMs);
+      return;
     default:
       break;
   }
@@ -6759,7 +6857,7 @@ void App::wizardStepBack(uint32_t nowMs) {
   }
   if (menuScreen_ == MenuScreen::BookPicker && wizardBookPickerActive_) {
     wizardBookPickerActive_ = false;
-    openWelcomeConnect(nowMs);
+    openWelcomeConfigureInApp(nowMs);
     return;
   }
 }
@@ -8076,6 +8174,11 @@ String App::handednessLabel() const {
                                                  : tr(TrKey::RightHand);
 }
 
+String App::savePointNameModeLabel() const {
+  return savePointUseCustomName_ ? tr3(TrKey3::SavePointNameCustomOption)
+                                 : tr3(TrKey3::SavePointNameDefaultOption);
+}
+
 String App::navModeLabel() const {
   switch (navMode_) {
     case NavMode::DPad:
@@ -8730,6 +8833,39 @@ void App::restoreArchivedSavePointsForReturnedBooks() {
                 static_cast<unsigned int>(restored.size()), restored.size() == 1 ? "y" : "ies");
 }
 
+void App::finishSavePointCreation(const String &name, uint32_t nowMs) {
+  if (usingStorageBook_ && !currentBookPath_.isEmpty()) {
+    SavePoint sp;
+    sp.bookPath = currentBookPath_;
+    sp.bookTitle = currentBookTitle_;
+    sp.wordIndex = reader_.currentIndex();
+    sp.progressPercent = readingProgressPercent();
+    sp.name = name;
+    loadSavePoints();
+    savePoints_.insert(savePoints_.begin(), sp);
+    if (savePoints_.size() > kMaxSavePoints) {
+      savePoints_.pop_back();
+    }
+    persistSavePoints();
+    Serial.printf("[save-point] created: %s word=%u\n", sp.name.c_str(),
+                  static_cast<unsigned int>(sp.wordIndex));
+    display_.renderStatus(uiText(UiText::SavePoints),
+                          tr3(TrKey3::BookmarkAdded), name);
+    delay(1200);
+  }
+  flushStaleTouch();
+  if (savePointQuickSaveFromReader_) {
+    // Quick-save from the reader: go back to reading, not to the
+    // SavePointsList menu — the point was already saved, the user
+    // wants to keep reading, not browse their bookmarks.
+    savePointQuickSaveFromReader_ = false;
+    menuScreen_ = MenuScreen::Main;
+    setState(AppState::Paused, nowMs);
+    return;
+  }
+  openSavePointsList();
+}
+
 void App::createSavePoint(uint32_t nowMs) {
   (void)nowMs;
   if (!usingStorageBook_ || currentBookPath_.isEmpty()) {
@@ -8810,11 +8946,15 @@ void App::selectSavePointItem(uint32_t nowMs) {
     // Generate default name
     const String defaultName = savePointDefaultName();
     savePointQuickSaveFromReader_ = false;
-    openTextEntry(TextEntryPurpose::SavePointName,
-                  tr3(TrKey3::NameBookmark),
-                  tr3(TrKey3::EnterNamePrompt),
-                  "", defaultName, "", false, 30,
-                  MenuScreen::SavePointsList);
+    if (savePointUseCustomName_) {
+      openTextEntry(TextEntryPurpose::SavePointName,
+                    tr3(TrKey3::NameBookmark),
+                    tr3(TrKey3::EnterNamePrompt),
+                    "", defaultName, "", false, 30,
+                    MenuScreen::SavePointsList);
+    } else {
+      finishSavePointCreation(defaultName, nowMs);
+    }
     return;
   }
 
@@ -10932,6 +11072,11 @@ void App::renderMenu() {
     renderUpdateConfirm();
   } else if (menuScreen_ == MenuScreen::WelcomeConnect) {
     renderWelcomeConnect();
+  } else if (menuScreen_ == MenuScreen::WelcomeAppPairing) {
+    renderWelcomeAppPairing();
+  } else if (menuScreen_ == MenuScreen::WelcomeConfigureInApp) {
+    renderWelcomeTimedMessage(tr3(TrKey3::WelcomeConfigureInAppLine1),
+                              tr3(TrKey3::WelcomeConfigureInAppLine2));
   } else if (menuScreen_ == MenuScreen::WelcomeReadingModePreview) {
     renderWelcomeReadingModePreview();
   } else if (menuScreen_ == MenuScreen::WelcomeLoading) {

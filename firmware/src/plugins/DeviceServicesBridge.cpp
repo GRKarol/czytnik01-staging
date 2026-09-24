@@ -625,6 +625,67 @@ constexpr const char* kWifiPrefsNamespace = "rsvp";
 constexpr const char* kWifiPrefSsidKey = "wifi_ssid";
 constexpr const char* kWifiPrefPassKey = "wifi_pass";
 constexpr uint32_t kNetworkWifiConnectTimeoutMs = 15000;
+constexpr const char* kFlowerHostname = "Flower-Edition-1";
+// Mirrors App.cpp's remembered-networks ring (same "rsvp" NVS namespace) so
+// a plugin's background fetch can fall back to any known network that's
+// currently in range, not only the one last connected to.
+constexpr const char* kSavedWifiSsidPrefix = "wnet_s";
+constexpr const char* kSavedWifiPassPrefix = "wnet_p";
+constexpr size_t kMaxSavedWifiNetworks = 5;
+constexpr uint32_t kFallbackWifiConnectTimeoutMs = 8000;
+
+bool tryConnectAnySavedWifi(const String& alreadyTried, String& connectedSsidOut) {
+    WiFi.disconnect(false, false);
+    delay(50);
+    const int networkCount = WiFi.scanNetworks(false, true);
+    if (networkCount <= 0) {
+        WiFi.scanDelete();
+        return false;
+    }
+
+    Preferences prefs;
+    if (!prefs.begin(kWifiPrefsNamespace, /*readOnly=*/true)) {
+        WiFi.scanDelete();
+        return false;
+    }
+
+    bool connected = false;
+    for (size_t slot = 0; slot < kMaxSavedWifiNetworks && !connected; ++slot) {
+        const String ssid = prefs.getString((String(kSavedWifiSsidPrefix) + String(slot)).c_str(), "");
+        if (ssid.isEmpty() || ssid == alreadyTried) {
+            continue;
+        }
+        bool inRange = false;
+        for (int i = 0; i < networkCount; ++i) {
+            if (WiFi.SSID(i) == ssid) {
+                inRange = true;
+                break;
+            }
+        }
+        if (!inRange) {
+            continue;
+        }
+        const String password = prefs.getString((String(kSavedWifiPassPrefix) + String(slot)).c_str(), "");
+        WiFi.begin(ssid.c_str(), password.c_str());
+        const uint32_t startMs = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - startMs < kFallbackWifiConnectTimeoutMs) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        if (WiFi.status() == WL_CONNECTED) {
+            connected = true;
+            connectedSsidOut = ssid;
+            Preferences writePrefs;
+            if (writePrefs.begin(kWifiPrefsNamespace, false)) {
+                writePrefs.putString(kWifiPrefSsidKey, ssid);
+                writePrefs.putString(kWifiPrefPassKey, password);
+                writePrefs.end();
+            }
+        }
+    }
+    prefs.end();
+    WiFi.scanDelete();
+    return connected;
+}
 constexpr uint32_t kNetworkFetchTimeoutMs = 15000;
 constexpr size_t kNetworkMaxFetchBytes = 98304;  // 96KB — plenty for an RSS/Atom feed body
 constexpr uint32_t kNetworkTaskStackSize = 8192;
@@ -673,6 +734,7 @@ void networkFetchTaskFn(void* param) {
         }
 
         WiFi.mode(WIFI_STA);
+        WiFi.setHostname(kFlowerHostname);
         WiFi.begin(ssid.c_str(), password.c_str());
         const uint32_t startMs = millis();
         while (WiFi.status() != WL_CONNECTED &&
@@ -688,12 +750,17 @@ void networkFetchTaskFn(void* param) {
         }
 
         if (WiFi.status() != WL_CONNECTED) {
-            snprintf(sNetworkErrorMessage, sizeof(sNetworkErrorMessage), "WiFi connect failed");
-            sNetworkStatus = PLUGIN_NETWORK_ERROR;
-            free(url);
-            sNetworkTaskHandle = nullptr;
-            vTaskDelete(nullptr);
-            return;
+            // Saved primary network isn't in range — try any other network
+            // we already know about that's actually visible right now.
+            String fallbackSsid;
+            if (!tryConnectAnySavedWifi(ssid, fallbackSsid)) {
+                snprintf(sNetworkErrorMessage, sizeof(sNetworkErrorMessage), "WiFi connect failed");
+                sNetworkStatus = PLUGIN_NETWORK_ERROR;
+                free(url);
+                sNetworkTaskHandle = nullptr;
+                vTaskDelete(nullptr);
+                return;
+            }
         }
     }
 

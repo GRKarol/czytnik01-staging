@@ -153,6 +153,8 @@ class App {
     WelcomeReadingMode,
     WelcomeReadingModePreview,
     WelcomeConnect,
+    WelcomeAppPairing,
+    WelcomeConfigureInApp,
     TutorialStep1,
     TutorialStep2,
     TutorialStep3,
@@ -335,6 +337,8 @@ class App {
   bool isBatteryBadgeTap(uint16_t x, uint16_t y) const;
   bool isPreviousSentenceTap(uint16_t x, uint16_t y) const;
   bool isSavePointButtonTap(uint16_t x, uint16_t y) const;
+  bool isWizardNextCornerTap(uint16_t x, uint16_t y) const;
+  bool welcomeConnectQrAvailable() const;
   bool isCurrentPositionSaved() const;
   bool isActivelyReading() const;
   bool readerFooterVisible() const;
@@ -487,6 +491,10 @@ class App {
   void openWelcomeConnect(uint32_t nowMs);
   void renderWelcomeConnect();
   void selectWelcomeConnectTap(uint32_t nowMs);
+  void openWelcomeAppPairing(uint32_t nowMs);
+  void renderWelcomeAppPairing();
+  void selectWelcomeAppPairingTap(uint32_t nowMs);
+  void openWelcomeConfigureInApp(uint32_t nowMs);
   void openWelcomeBookPicker(uint32_t nowMs);
   void finishWelcomeWizard(uint32_t nowMs);
   void wizardStepBack(uint32_t nowMs);
@@ -542,6 +550,7 @@ class App {
   String scrollMarginLabel() const;
   String pauseModeLabel() const;
   String handednessLabel() const;
+  String savePointNameModeLabel() const;
   String navModeLabel() const;
   String readerFontSizeLabel() const;
   String readerTypefaceLabel() const;
@@ -565,6 +574,7 @@ class App {
   void selectSavePointDeleteConfirmItem(uint32_t nowMs);
   void executeDeleteSavePoint(uint32_t nowMs);
   void createSavePoint(uint32_t nowMs);
+  void finishSavePointCreation(const String &name, uint32_t nowMs);
   void deleteSavePoint(size_t index);
   void loadSavePoints();
   void persistSavePoints();
@@ -1210,6 +1220,7 @@ class App {
   bool readerChapterVisibleWhilePlaying_ = true;
   bool readerProgressVisibleWhilePlaying_ = false;
   bool savePointButtonVisible_ = false;
+  bool savePointUseCustomName_ = true;
   // True while naming a save point created via the in-reader quick-save
   // button, so committing/cancelling that name entry resumes reading
   // instead of landing on the SavePointsList menu (which is where naming

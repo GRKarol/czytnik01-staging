@@ -258,8 +258,13 @@ class DisplayManager {
                     uint8_t line1ScalePercent = 36, uint8_t line2ScalePercent = 28);
   // `hint` to trzecia, przygaszona linijka pod QR-em. Domyślnie zdanie dla
   // ekranu parowania z telefonem; ekran „zainstaluj aplikację" podaje swoje.
+  // `cornerHint`, jeśli niepuste, rysuje mały wypełniony przycisk w prawym
+  // dolnym rogu (np. "Dalej") — używane przez kreator, żeby dać dotykowe
+  // wyjście z ekranu QR bez zostawiania całego ekranu jako jeden wielki
+  // przycisk "dalej" (patrz App::renderWelcomeConnect()).
   void renderStatusWithQr(const String &title, const String &line1, const bool *qrData,
-                          uint8_t qrSize, const String &hint = "Scan to connect");
+                          uint8_t qrSize, const String &hint = "Scan to connect",
+                          const String &cornerHint = "");
   void renderProgress(const String &title, const String &line1 = "", const String &line2 = "",
                       int progressPercent = -1, uint8_t line1ScalePercent = 36,
                       uint8_t line2ScalePercent = 28);

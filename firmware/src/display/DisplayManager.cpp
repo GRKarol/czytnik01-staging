@@ -4089,14 +4089,15 @@ void DisplayManager::drawButtons(const std::vector<Button> &buttons) {
       // right in focusColor when on, left and dim when off, so the state
       // reads from the knob position alone (not just a text swap).
       //
-      // The label runs at half the usual tile-label scale: these widgets
-      // stack label + track in one tile (less headroom than a plain
-      // button), and Polish setting names ("Bateria w czytniku") routinely
-      // ran past the tile width at the normal scale and got "..."-cut —
-      // dropping to scale 1 buys roughly double the characters before that
-      // kicks in.
-      constexpr int kToggleLabelScale = 1;
+      // Try the normal tile-label scale (kTinyScale, same as everywhere
+      // else) first — only drop to half that if the label actually doesn't
+      // fit at full size. Long Polish setting names ("Bateria w czytniku")
+      // still get the smaller scale so they don't "..."-truncate, but most
+      // labels are short enough to stay legible at full size instead of
+      // being shrunk unconditionally.
       const int maxWidth = std::max(0, static_cast<int>(button.width) - 8);
+      const int kToggleLabelScale =
+          measureTinyTextWidth(button.label, kTinyScale) <= maxWidth ? kTinyScale : 1;
       const String labelText = fitTinyText(button.label, maxWidth, kToggleLabelScale);
       const int labelW = measureTinyTextWidth(labelText, kToggleLabelScale);
       const int trackW = std::min(maxWidth, 34);
@@ -4120,11 +4121,12 @@ void DisplayManager::drawButtons(const std::vector<Button> &buttons) {
     if (button.kind == Button::ButtonKind::Cycle && button.cycleCount > 0) {
       // Label on top, one dot per possible value below it — the lit dot is
       // the current value, so "which of N states am I in" is legible
-      // without re-reading the text after every tap. Same half-scale label
-      // as Toggle above, same reason (long Polish labels + a widget stacked
-      // underneath eating into the tile's headroom).
-      constexpr int kCycleLabelScale = 1;
+      // without re-reading the text after every tap. Same auto-scale
+      // fallback as Toggle above: full kTinyScale when the label fits,
+      // otherwise half that so long Polish labels don't "..."-truncate.
       const int maxWidth = std::max(0, static_cast<int>(button.width) - 8);
+      const int kCycleLabelScale =
+          measureTinyTextWidth(button.label, kTinyScale) <= maxWidth ? kTinyScale : 1;
       const String labelText = fitTinyText(button.label, maxWidth, kCycleLabelScale);
       const int labelW = measureTinyTextWidth(labelText, kCycleLabelScale);
       const int dotR = 3;
@@ -4462,7 +4464,8 @@ void DisplayManager::renderStatus(const String &title, const String &line1, cons
 }
 
 void DisplayManager::renderStatusWithQr(const String &title, const String &line1,
-                                        const bool *qrData, uint8_t qrSize, const String &hint) {
+                                        const bool *qrData, uint8_t qrSize, const String &hint,
+                                        const String &cornerHint) {
   if (!initialized_ || qrData == nullptr || qrSize == 0) {
     return;
   }
@@ -4477,7 +4480,7 @@ void DisplayManager::renderStatusWithQr(const String &title, const String &line1
   // caller's pointer+size: the only caller (install-app QR) fills a static
   // buffer once and reuses it, so identical pointer+size means identical
   // pixels.
-  const String renderKey = "qr|" + title + "|" + line1 + "|" + hint + "|" +
+  const String renderKey = "qr|" + title + "|" + line1 + "|" + hint + "|c:" + cornerHint + "|" +
                            String(reinterpret_cast<uintptr_t>(qrData)) + "|" +
                            String(qrSize) + "|d:" + String(darkMode_ ? 1 : 0) +
                            "|n:" + String(nightMode_ ? 1 : 0);
@@ -4568,6 +4571,22 @@ void DisplayManager::renderStatusWithQr(const String &title, const String &line1
   // Ikona Back w rogu — ten sam wektorowy chevron co w renderStatus(), nie
   // maleńki bitmapowy znak "<" (nieczytelny, wyglądał jak inny font).
   drawIcon(ui::IconId::Back, 4, 4, 16, dimColor());
+
+  if (!cornerHint.isEmpty()) {
+    // Prawy dolny róg — patrz komentarz przy deklaracji w DisplayManager.h.
+    // App::isWizardNextCornerTap() musi trafiać w ten sam prostokąt.
+    const int btnW = 70;
+    const int btnH = 20;
+    const int btnX = virtualWidth - btnW - 4;
+    const int btnY = virtualHeight - btnH - 4;
+    fillVirtualRect(btnX, btnY, btnW, btnH, focusColor());
+    const String fittedHint = fitTinyText(cornerHint, btnW - 8, kTinyScale);
+    const int hintW = measureTinyTextWidth(fittedHint, kTinyScale);
+    const int hintX = btnX + std::max(0, (btnW - hintW) / 2);
+    const int hintY = btnY + std::max(0, (btnH - kTinyGlyphHeight * kTinyScale) / 2);
+    drawTinyTextAt(fittedHint, hintX, hintY, backgroundColor(), kTinyScale);
+  }
+
   drawBatteryBadge();
 
   flushScaledFrame(scale, virtualWidth, virtualHeight);

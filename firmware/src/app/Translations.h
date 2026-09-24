@@ -257,6 +257,13 @@ enum class TrKey3 : uint8_t {
   WelcomeLoadingBottomDownloading,
   WelcomePowerBackHint,
   WifiSkipHint,
+  SavePointNameModeColon,
+  SavePointNameCustomOption,
+  SavePointNameDefaultOption,
+  NextLabel,
+  WelcomeAppPairingTitle,
+  WelcomeConfigureInAppLine1,
+  WelcomeConfigureInAppLine2,
 };
 
 namespace Translations3 {
