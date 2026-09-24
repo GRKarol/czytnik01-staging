@@ -6724,12 +6724,17 @@ void App::selectWelcomeConnectTap(uint32_t nowMs) {
 void App::openWelcomeAppPairing(uint32_t nowMs) {
   menuScreen_ = MenuScreen::WelcomeAppPairing;
   welcomeScreenEnteredMs_ = nowMs;
-  renderWelcomeAppPairing();
 
   // Start AP + BLE pairing if not already running from auto-sync — moved
   // here (was in openWelcomeConnect()) so the radios only come on once the
   // user is actually looking at the pairing QR, not while they're still
-  // reading the app-download screen.
+  // reading the app-download screen. Must happen BEFORE the render call
+  // below: renderWelcomeAppPairing() only draws the real QR once
+  // companionSync_.hasQrCode() is true, which begin() is what sets up —
+  // rendering first left the very first paint of this screen QR-less
+  // (fallback text branch) with nothing left to repaint it afterwards,
+  // since the client-connected redraw in App::update() never fires without
+  // a QR to scan in the first place.
   if (!autoSyncActive_ && !companionSync_.active()) {
     CompanionSyncManager::Config syncConfig;
     syncConfig.wifiSsid = "";
@@ -6746,6 +6751,7 @@ void App::openWelcomeAppPairing(uint32_t nowMs) {
     Serial.printf("[welcome] BLE turned on for phone pairing (name=%s)\n",
                   ble_.deviceName().c_str());
   }
+  renderWelcomeAppPairing();
 }
 
 void App::renderWelcomeAppPairing() {
