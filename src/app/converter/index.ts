@@ -3,9 +3,9 @@ import { writeRsvp } from "./rsvp";
 import { parseTxt, parseMarkdown, parseHtml } from "./text-formats";
 import { parseEpub } from "./epub";
 import { parsePdf } from "./pdf";
+import { parseMobi } from "./mobi";
 
-export type SupportedFormat = "txt" | "md" | "html" | "epub" | "pdf";
-export type PlannedFormat = "mobi" | "azw" | "azw3";
+export type SupportedFormat = "txt" | "md" | "html" | "epub" | "pdf" | "mobi" | "azw" | "azw3";
 
 const SUPPORTED_EXT: Record<string, SupportedFormat> = {
   txt: "txt",
@@ -18,23 +18,19 @@ const SUPPORTED_EXT: Record<string, SupportedFormat> = {
   xhtml: "html",
   epub: "epub",
   pdf: "pdf",
-};
-
-const PLANNED_EXT: Record<string, PlannedFormat> = {
   mobi: "mobi",
   azw: "azw",
   azw3: "azw3",
 };
 
 export interface DetectionResult {
-  kind: "supported" | "planned" | "unknown";
-  format?: SupportedFormat | PlannedFormat;
+  kind: "supported" | "unknown";
+  format?: SupportedFormat;
 }
 
 export function detectFormat(file: File): DetectionResult {
   const ext = (file.name.split(".").pop() ?? "").toLowerCase();
   if (ext in SUPPORTED_EXT) return { kind: "supported", format: SUPPORTED_EXT[ext] };
-  if (ext in PLANNED_EXT) return { kind: "planned", format: PLANNED_EXT[ext] };
   return { kind: "unknown" };
 }
 
@@ -50,6 +46,10 @@ export async function parseFile(file: File, format: SupportedFormat): Promise<Pa
       return parseEpub(file);
     case "pdf":
       return parsePdf(file);
+    case "mobi":
+    case "azw":
+    case "azw3":
+      return parseMobi(file);
   }
 }
 

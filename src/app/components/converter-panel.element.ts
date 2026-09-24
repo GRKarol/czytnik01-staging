@@ -41,9 +41,7 @@ export class ConverterPanel extends LitElement {
         <label for="picker" class="picker">
           <strong>Wybierz plik</strong>
           <span>lub upuść go tutaj</span>
-          <span class="formats"
-            >EPUB · PDF · TXT · MD · HTML &nbsp;·&nbsp; <i>MOBI wkrótce</i></span
-          >
+          <span class="formats">EPUB · PDF · MOBI · AZW3 · TXT · MD · HTML</span>
         </label>
       </div>
 
@@ -142,11 +140,6 @@ export class ConverterPanel extends LitElement {
     if (detection.kind === "unknown") {
       this.stage = "error";
       this.error = `Nieobsługiwany format: ${file.name}.`;
-      return;
-    }
-    if (detection.kind === "planned") {
-      this.stage = "error";
-      this.error = `Format ${detection.format!.toUpperCase()} jeszcze nie jest wspierany — wkrótce.`;
       return;
     }
 

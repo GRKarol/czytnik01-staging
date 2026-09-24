@@ -554,7 +554,7 @@ Kolejny rozdział zaczyna się dyrektywą @chapter.
    - Czytnik się restartuje
 
 5. **Konwersja (w aplikacji, offline):**
-   - Konwertuj EPUB/PDF/MOBI/TXT → .rsvp w telefonie
+   - Konwertuj EPUB/PDF/MOBI/AZW3/TXT/MD/HTML → .rsvp w telefonie
    - Wynik: `POST /api/books` z plikiem .rsvp
    - Czytnik widzi nową książkę w bibliotece
 
