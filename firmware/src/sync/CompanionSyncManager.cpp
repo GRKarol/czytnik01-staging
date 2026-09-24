@@ -11,6 +11,7 @@
 
 #include "sync/WifiQrCode.h"
 #include "ble/BleApi.h"
+#include "plugins/BuiltinPlugins.h"
 #include "update/OtaUpdater.h"
 #include <qrcode.h>
 
@@ -1490,21 +1491,43 @@ void CompanionSyncManager::handleCapabilities() {
 
 // ─── /api/plugins ────────────────────────────────────────────────────────────
 
+namespace {
+
+// Mirrors PluginLibrary's own NVS layout (namespace "plugins", key
+// "enabled", comma-separated ids) — read directly here instead of sharing an
+// App-owned PluginLibrary instance, same decoupled pattern already used for
+// settings/RSS in this file.
+bool isPluginEnabledInNvs(const char *id) {
+  Preferences prefs;
+  prefs.begin("plugins", true);
+  const String csv = prefs.getString("enabled", "");
+  prefs.end();
+  if (csv.isEmpty()) return false;
+  const String needle = String(",") + id + ",";
+  const String haystack = String(",") + csv + ",";
+  return haystack.indexOf(needle) >= 0;
+}
+
+}  // namespace
+
 void CompanionSyncManager::handlePlugins() {
   sendCorsHeaders();
   String body;
-  body.reserve(512);
+  body.reserve(768);
   body += "{\"ok\":true,\"plugins\":[";
 
-  // Timer plugin — now a dynamic SD-card plugin
-  body += "{\"id\":\"focus-timer\",\"name\":\"Focus Timer\"";
-  body += ",\"installed\":true,\"builtin\":false";
-  body += ",\"active\":true}";
-
-  // RSS plugin — now a dynamic SD-card plugin
-  body += ",{\"id\":\"rss\",\"name\":\"RSS Feeds\"";
-  body += ",\"installed\":true,\"builtin\":false";
-  body += ",\"active\":true}";
+  const BuiltinPlugin *plugins = BuiltinPlugins::all();
+  const size_t count = BuiltinPlugins::count();
+  for (size_t i = 0; i < count; ++i) {
+    if (i > 0) body += ",";
+    body += "{\"id\":\"";
+    body += plugins[i].id;
+    body += "\",\"name\":\"";
+    body += plugins[i].name;
+    body += "\",\"installed\":true,\"builtin\":true,\"active\":";
+    body += isPluginEnabledInNvs(plugins[i].id) ? "true" : "false";
+    body += "}";
+  }
 
   body += "]}";
   server_.send(200, "application/json", body);

@@ -198,8 +198,14 @@ const STORE_POSITIONS = "flower.mock.bookPositions";
 const EMPTY_WIFI: WifiStationConfig = { configured: false, ssid: "", passwordSet: false };
 
 const MOCK_PLUGINS: PluginInfo[] = [
-  { id: "focus-timer", name: "Focus Timer", installed: true, active: true, builtin: false },
-  { id: "rss", name: "RSS Feeds", installed: true, active: true, builtin: false },
+  { id: "dictaphone", name: "Dyktafon", installed: true, active: false, builtin: true },
+  { id: "focus-timer", name: "Klepsydra", installed: true, active: true, builtin: true },
+  { id: "rss", name: "RSS", installed: true, active: true, builtin: true },
+  { id: "night-reading", name: "Tryb nocnego czytania", installed: true, active: false, builtin: true },
+  { id: "page-counter", name: "Licznik stron", installed: true, active: false, builtin: true },
+  { id: "quote-highlight", name: "Cytaty", installed: true, active: false, builtin: true },
+  { id: "reading-stats", name: "Statystyki czytania", installed: true, active: false, builtin: true },
+  { id: "notes-sync", name: "Notatki", installed: true, active: false, builtin: true },
 ];
 
 const MOCK_CAPABILITIES: DeviceCapabilities = {

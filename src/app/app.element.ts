@@ -484,13 +484,13 @@ export class CzytnikApp extends LitElement {
   }
 
   private renderPlugins() {
-    const focusTimer = this.plugins.find((p) => p.id === "focus-timer");
     const rss = this.plugins.find((p) => p.id === "rss");
     return html`
       <section class="card">
         <h3>${iconPlug(22)} Pluginy</h3>
         <p class="muted">
-          Dodatkowe funkcje wgrane na urządzeniu. Nowe pluginy pojawiają się tu sukcesywnie.
+          Dodatkowe funkcje wgrane na urządzeniu. Włączaj i wyłączaj je na czytniku, w
+          Ustawieniach → Pluginy.
         </p>
         ${this.pluginsError ? html`<p class="error">${this.pluginsError}</p>` : ""}
         ${!this.connected
@@ -499,22 +499,9 @@ export class CzytnikApp extends LitElement {
             ? html`<p class="muted">Wczytuję…</p>`
             : html`
                 <div class="plugin-list">
-                  ${this.pluginCard(
-                    "Klepsydra (Focus Timer)",
-                    "Sesja czytania z timerem.",
-                    focusTimer?.active ? "Aktywny" : "Niedostępny",
-                  )}
-                  ${this.pluginCard(
-                    "RSS Feeds",
-                    "Artykuły z Twoich subskrypcji trafiają na czytnik.",
-                    rss?.active ? "Aktywny" : "Niedostępny",
-                  )}
-                  ${this.pluginCard(
-                    "Dyktafon",
-                    "Notatki głosowe podczas czytania — nie jest jeszcze zarejestrowany w firmware.",
-                    "Niedostępne",
-                  )}
-                  ${this.pluginCard("Odtwarzacz muzyki", "Cicha muzyka tła z SD.", "Wkrótce")}
+                  ${this.plugins.length === 0
+                    ? html`<p class="muted">Czytnik nie zgłosił żadnych pluginów.</p>`
+                    : this.plugins.map((p) => this.pluginCard(p.name, p.active))}
                 </div>
 
                 ${rss?.active ? this.renderRssEditor() : ""}
@@ -523,15 +510,15 @@ export class CzytnikApp extends LitElement {
     `;
   }
 
-  private pluginCard(name: string, tagline: string, badge: string) {
+  private pluginCard(name: string, active: boolean) {
+    const badge = active ? "Aktywny" : "Wyłączony";
     return html`
       <div class="plugin">
         <span class="plugin-ico">${iconFlower(36)}</span>
         <div class="plugin-body">
           <strong>${name}</strong>
-          <span>${tagline}</span>
         </div>
-        <span class=${`badge ${badge === "Aktywny" ? "ok" : ""}`}>${badge}</span>
+        <span class=${`badge ${active ? "ok" : ""}`}>${badge}</span>
       </div>
     `;
   }
