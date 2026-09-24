@@ -847,6 +847,7 @@ export class SettingsPanel extends LitElement {
       gap: 2px;
       padding: 14px;
       border: 1px solid var(--line);
+      border-radius: var(--radius, 13px);
       background: var(--paper-tint);
       cursor: pointer;
       user-select: none;
@@ -875,6 +876,7 @@ export class SettingsPanel extends LitElement {
       margin: 0;
       padding: 16px;
       border: 1px solid var(--line);
+      border-radius: var(--radius, 13px);
       background: var(--paper-tint);
       display: flex;
       flex-direction: column;
@@ -897,6 +899,7 @@ export class SettingsPanel extends LitElement {
       display: grid;
       place-items: center;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm, 9px);
       background: var(--sky-2);
       color: var(--accent);
     }
@@ -971,7 +974,9 @@ export class SettingsPanel extends LitElement {
       grid-auto-columns: 1fr;
       gap: 4px;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm, 9px);
       background: transparent;
+      overflow: hidden;
     }
     .seg-buttons button {
       padding: 8px 10px;
@@ -1002,6 +1007,7 @@ export class SettingsPanel extends LitElement {
     .select input[type="password"] {
       padding: 10px 12px;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm, 9px);
       background: #fff;
       font: 0.95rem var(--ns);
       color: var(--ink);
@@ -1015,6 +1021,7 @@ export class SettingsPanel extends LitElement {
       flex: 1 1 auto;
       padding: 9px 14px;
       border: 1px solid var(--accent);
+      border-radius: var(--radius-sm, 9px);
       color: #fff;
       background: var(--accent);
       font: 700 0.8rem var(--mn);
@@ -1079,6 +1086,7 @@ export class SettingsPanel extends LitElement {
       padding: 10px 12px;
       background: #fff;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm, 9px);
       font: 0.72rem/1.5 var(--mn);
       color: var(--ink-soft);
       white-space: pre-wrap;
@@ -1090,6 +1098,7 @@ export class SettingsPanel extends LitElement {
       gap: 10px;
       padding: 14px;
       border: 1px solid var(--line);
+      border-radius: var(--radius, 13px);
       background: var(--paper-tint);
       color: var(--ink);
       font: 600 0.95rem var(--ns);

@@ -7,9 +7,12 @@ import {
   type ParsedBook,
   type SupportedFormat,
 } from "../converter";
+import { deviceApi, onDeviceApiChange } from "../device/api";
+import { HttpDeviceApi } from "../device/http-api";
 import "./first-use-hint.element";
 
 type Stage = "idle" | "parsing" | "ready" | "error";
+type SendState = "idle" | "sending" | "sent" | "error";
 
 @customElement("converter-panel")
 export class ConverterPanel extends LitElement {
@@ -21,6 +24,23 @@ export class ConverterPanel extends LitElement {
   @state() private dragOver = false;
   @state() private bookTitle = "";
   @state() private bookAuthor = "";
+  @state() private deviceConnected = deviceApi.current instanceof HttpDeviceApi;
+  @state() private sendState: SendState = "idle";
+  @state() private sendError = "";
+
+  private unsubApi: (() => void) | null = null;
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    this.unsubApi = onDeviceApiChange(() => {
+      this.deviceConnected = deviceApi.current instanceof HttpDeviceApi;
+    });
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.unsubApi?.();
+  }
 
   render() {
     return html`
@@ -95,10 +115,17 @@ export class ConverterPanel extends LitElement {
         </ul>
         <div class="row">
           <button class="cta" @click=${this.download}>Pobierz .rsvp</button>
-          <button class="cta ghost" disabled title="Wymaga połączenia z urządzeniem">
-            Wyślij na urządzenie (wkrótce)
+          <button
+            class="cta ghost"
+            ?disabled=${!this.deviceConnected || this.sendState === "sending"}
+            title=${this.deviceConnected ? "" : "Połącz się z czytnikiem przez WiFi, żeby wysłać bezpośrednio"}
+            @click=${this.sendToDevice}
+          >
+            ${this.sendState === "sending" ? "Wysyłam…" : "Wyślij na urządzenie"}
           </button>
         </div>
+        ${this.sendState === "sent" ? html`<p class="status ok">Wysłano do biblioteki na czytniku.</p>` : ""}
+        ${this.sendState === "error" ? html`<p class="error">${this.sendError}</p>` : ""}
         <details class="preview">
           <summary>Podgląd pierwszych linii</summary>
           <pre>${this.rsvp.split("\n").slice(0, 20).join("\n")}</pre>
@@ -135,6 +162,8 @@ export class ConverterPanel extends LitElement {
   private async handleFile(file: File) {
     this.error = "";
     this.fileName = file.name;
+    this.sendState = "idle";
+    this.sendError = "";
 
     const detection = detectFormat(file);
     if (detection.kind === "unknown") {
@@ -157,22 +186,43 @@ export class ConverterPanel extends LitElement {
     }
   }
 
-  private download = () => {
-    if (!this.book) return;
-    // Re-serialize z aktualnymi metadanymi (mogły być edytowane).
+  // Re-serializuje z aktualnymi metadanymi (mogły być edytowane w polach tytuł/autor)
+  // i zwraca gotową nazwę pliku — współdzielone przez pobieranie i wysyłkę na urządzenie.
+  private buildOutput(): { blob: Blob; fileName: string } {
     const updated = writeRsvp({
-      ...this.book,
-      metadata: { ...this.book.metadata, title: this.bookTitle, author: this.bookAuthor },
+      ...this.book!,
+      metadata: { ...this.book!.metadata, title: this.bookTitle, author: this.bookAuthor },
     });
     const blob = new Blob([updated], { type: "text/plain" });
+    // \p{L}/\p{N} (Unicode letters/numbers) zamiast \w, żeby polskie znaki
+    // (ą,ć,ę,ł,ń,ó,ś,ź,ż) w nazwie pliku nie zamieniały się na "_".
+    const fileName = `${(this.bookTitle || stripExt(this.fileName) || "book").replace(/[^\p{L}\p{N}\- ]+/gu, "_")}.rsvp`;
+    return { blob, fileName };
+  }
+
+  private download = () => {
+    if (!this.book) return;
+    const { blob, fileName } = this.buildOutput();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    // \p{L}/\p{N} (Unicode letters/numbers) zamiast \w, żeby polskie znaki
-    // (ą,ć,ę,ł,ń,ó,ś,ź,ż) w nazwie pliku nie zamieniały się na "_".
-    a.download = `${(this.bookTitle || stripExt(this.fileName) || "book").replace(/[^\p{L}\p{N}\- ]+/gu, "_")}.rsvp`;
+    a.download = fileName;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  private sendToDevice = async () => {
+    if (!this.book || !this.deviceConnected) return;
+    this.sendState = "sending";
+    this.sendError = "";
+    try {
+      const { blob, fileName } = this.buildOutput();
+      await deviceApi.uploadBook(blob, fileName);
+      this.sendState = "sent";
+    } catch (err) {
+      this.sendState = "error";
+      this.sendError = err instanceof Error ? err.message : String(err);
+    }
   };
 
   static styles = css`
@@ -181,6 +231,7 @@ export class ConverterPanel extends LitElement {
     }
     .drop {
       border: 2px dashed var(--line);
+      border-radius: var(--radius, 13px);
       padding: 28px 18px;
       text-align: center;
       transition:
@@ -219,6 +270,9 @@ export class ConverterPanel extends LitElement {
       color: var(--muted);
       font: 0.92rem var(--ns);
     }
+    .status.ok {
+      color: var(--ok);
+    }
     .error {
       margin: 0;
       color: var(--err);
@@ -249,6 +303,7 @@ export class ConverterPanel extends LitElement {
     .meta input {
       padding: 10px 12px;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm, 9px);
       background: #fff;
       font: 0.95rem var(--ns);
       color: var(--ink);
@@ -271,6 +326,7 @@ export class ConverterPanel extends LitElement {
       align-items: baseline;
       padding: 10px 12px;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm, 9px);
       background: var(--paper-tint);
       font: 0.8rem var(--mn);
       color: var(--muted);
@@ -291,6 +347,7 @@ export class ConverterPanel extends LitElement {
     .cta {
       padding: 12px 18px;
       border: 1px solid var(--accent);
+      border-radius: var(--radius-sm, 9px);
       color: #fff;
       background: var(--accent);
       font: 700 0.85rem var(--mn);
@@ -313,6 +370,7 @@ export class ConverterPanel extends LitElement {
     }
     .preview {
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm, 9px);
       padding: 10px 12px;
       background: var(--paper-tint);
       font: 0.82rem var(--ns);

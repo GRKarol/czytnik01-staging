@@ -247,6 +247,7 @@ export class LibraryPanel extends LitElement {
       padding: 11px 16px;
       text-align: center;
       border: 1px solid var(--accent);
+      border-radius: var(--radius-sm, 9px);
       color: #fff;
       background: var(--accent);
       font: 700 0.85rem var(--mn);
@@ -271,6 +272,7 @@ export class LibraryPanel extends LitElement {
       flex: 1 1 auto;
       padding: 8px 10px;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm, 9px);
       background: var(--paper-tint);
       color: var(--ink-soft);
       font: 600 0.72rem var(--mn);
@@ -303,6 +305,7 @@ export class LibraryPanel extends LitElement {
     .sortbtn {
       padding: 5px 10px;
       border: 1px solid var(--line);
+      border-radius: var(--radius-pill, 999px);
       background: transparent;
       color: var(--ink-soft);
       font: 600 0.72rem var(--mn);
@@ -328,6 +331,7 @@ export class LibraryPanel extends LitElement {
       gap: 10px;
       padding: 10px 12px;
       border: 1px solid var(--line);
+      border-radius: var(--radius, 13px);
       background: var(--paper-tint);
     }
     .cover {
@@ -337,6 +341,7 @@ export class LibraryPanel extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
+      border-radius: var(--radius-sm, 9px);
       color: #fff;
       font: 700 0.95rem var(--fr);
     }

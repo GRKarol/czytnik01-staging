@@ -784,14 +784,20 @@ export class CzytnikApp extends LitElement {
       --err: #b8443a;
       --line: rgba(35, 32, 27, 0.14);
       --shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 20px 40px -26px rgba(35, 32, 27, 0.35);
+      --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 8px 16px -10px rgba(35, 32, 27, 0.3);
+      --radius-lg: 18px;
+      --radius: 13px;
+      --radius-sm: 9px;
+      --radius-pill: 999px;
       --fr: "Fraunces", Georgia, serif;
       --ns: "Newsreader", Georgia, serif;
       --mn: "JetBrains Mono", var(--mn);
       display: flex;
       flex-direction: column;
       position: relative;
-      min-height: 100vh;
-      min-height: 100dvh;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
       color: var(--ink);
       font-family: var(--ns);
       background: linear-gradient(180deg, var(--sky-1) 0%, var(--sky-2) 45%, var(--sky-3) 100%);
@@ -881,6 +887,7 @@ export class CzytnikApp extends LitElement {
       gap: 7px;
       padding: 5px 10px;
       border: 1px solid var(--line);
+      border-radius: var(--radius-pill);
       background: transparent;
       color: var(--muted);
       font: 600 0.72rem/1 var(--mn);
@@ -968,6 +975,7 @@ export class CzytnikApp extends LitElement {
       gap: 12px;
       padding: 20px;
       border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
       background: var(--paper);
       box-shadow: var(--shadow);
     }
@@ -1005,18 +1013,21 @@ export class CzytnikApp extends LitElement {
       gap: 14px;
       padding: 14px;
       border: 1px solid var(--line);
+      border-radius: var(--radius);
       background: var(--paper-tint);
       color: var(--ink);
       font: inherit;
       cursor: pointer;
       text-align: left;
-      transition: border-color 0.15s ease;
+      box-shadow: var(--shadow-sm);
+      transition: border-color 0.15s ease, transform 0.15s ease;
     }
     .choice:hover:not(:disabled) {
       border-color: var(--accent);
     }
     .choice:active:not(:disabled) {
       background: var(--sky-2);
+      transform: scale(0.99);
     }
     .choice:disabled {
       opacity: 0.5;
@@ -1024,6 +1035,7 @@ export class CzytnikApp extends LitElement {
     }
     .choice.subtle {
       background: transparent;
+      box-shadow: none;
     }
     .choice-ico {
       flex: 0 0 auto;
@@ -1032,6 +1044,7 @@ export class CzytnikApp extends LitElement {
       display: grid;
       place-items: center;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
       background: var(--sky-2);
       color: var(--accent);
     }
@@ -1081,6 +1094,7 @@ export class CzytnikApp extends LitElement {
     .steps .callout {
       background: rgba(46, 142, 255, 0.08);
       border: 1px solid rgba(46, 142, 255, 0.25);
+      border-radius: var(--radius-sm);
       padding: 8px 10px;
       list-style: none;
       margin-left: -1.2rem;
@@ -1097,12 +1111,14 @@ export class CzytnikApp extends LitElement {
     .cta {
       padding: 14px 20px;
       border: 1px solid var(--accent);
+      border-radius: var(--radius-sm);
       color: #fff;
       background: var(--accent);
       font: 700 0.88rem/1 var(--mn);
       letter-spacing: 0.02em;
       cursor: pointer;
-      transition: background 0.2s ease, color 0.2s ease;
+      box-shadow: var(--shadow-sm);
+      transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
     }
     .cta:hover {
       background: var(--accent-deep);
@@ -1111,6 +1127,7 @@ export class CzytnikApp extends LitElement {
     .cta:active:not(:disabled) {
       background: var(--ink);
       border-color: var(--ink);
+      transform: scale(0.98);
     }
     .cta:disabled {
       opacity: 0.55;
@@ -1139,19 +1156,22 @@ export class CzytnikApp extends LitElement {
       gap: 4px;
       padding: 14px;
       border: 1px solid var(--line);
+      border-radius: var(--radius);
       background: var(--paper-tint);
       color: var(--ink);
       cursor: pointer;
       text-align: left;
       font: inherit;
       min-height: 100px;
-      transition: border-color 0.15s ease, background 0.15s ease;
+      box-shadow: var(--shadow-sm);
+      transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
     }
     .tile:hover {
       border-color: var(--accent);
     }
     .tile:active {
       background: var(--sky-2);
+      transform: scale(0.99);
     }
     .tile-ico {
       width: 36px;
@@ -1159,6 +1179,7 @@ export class CzytnikApp extends LitElement {
       display: grid;
       place-items: center;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
       background: var(--sky-2);
       color: var(--accent);
       margin-bottom: 4px;
@@ -1185,6 +1206,7 @@ export class CzytnikApp extends LitElement {
       gap: 12px;
       padding: 12px;
       border: 1px solid var(--line);
+      border-radius: var(--radius);
       background: var(--paper-tint);
     }
     .plugin-ico {
@@ -1208,6 +1230,7 @@ export class CzytnikApp extends LitElement {
     }
     .badge {
       padding: 3px 8px;
+      border-radius: var(--radius-pill);
       background: var(--sky-2);
       color: var(--ink-soft);
       font: 600 0.68rem/1 var(--mn);
@@ -1228,6 +1251,7 @@ export class CzytnikApp extends LitElement {
       gap: 10px;
       padding: 14px;
       border: 1px solid var(--line);
+      border-radius: var(--radius);
       background: var(--paper-tint);
       font-family: var(--ns);
     }
@@ -1247,6 +1271,7 @@ export class CzytnikApp extends LitElement {
       padding: 8px 10px;
       background: #fff;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
     }
     .rss-list li span {
       font-size: 0.82rem;
@@ -1263,6 +1288,7 @@ export class CzytnikApp extends LitElement {
       flex: 1 1 auto;
       padding: 10px 12px;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
       background: #fff;
       font: 0.88rem var(--ns);
       color: var(--ink);
@@ -1324,21 +1350,23 @@ export class CzytnikApp extends LitElement {
       display: flex;
       flex-direction: column;
       align-items: center;
+      justify-content: center;
       gap: 4px;
+      min-height: 52px;
       padding: 10px 1px 8px;
       background: transparent;
       border: 0;
       border-top: 2px solid transparent;
       color: var(--muted);
-      font: 600 0.52rem/1.05 var(--mn);
+      font: 600 0.56rem/1.05 var(--mn);
       cursor: pointer;
       letter-spacing: -0.01em;
       white-space: nowrap;
       transition: color 0.15s ease, border-color 0.15s ease;
     }
     nav button .ico {
-      width: 22px;
-      height: 22px;
+      width: 24px;
+      height: 24px;
       display: grid;
       place-items: center;
     }

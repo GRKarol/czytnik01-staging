@@ -1,14 +1,35 @@
 import type { BookEvent, ParsedBook } from "./rsvp";
 
+// Rozpoznaje krótkie linie-nagłówki w tekście bez znaczników (txt, surowe
+// strony PDF): "Rozdział 3", "ROZDZIAŁ PIERWSZY", "Chapter One", rzymskie
+// numery ("XII"), albo krótka linia pisana WERSALIKAMI bez kropki na końcu.
+// Celowo restrykcyjne (krótkie, bez końcowej interpunkcji) — żeby zwykłe
+// zdania pisane wielką literą nie zamieniały się w fałszywe rozdziały.
+const CHAPTER_WORD = /^(rozdzia[łl]|cz[ęe][śs][ćc]|chapter|part|book)\b/i;
+const ROMAN_NUMERAL = /^[IVXLCDM]{1,8}\.?$/;
+
+export function looksLikeChapterHeading(line: string): boolean {
+  const t = line.trim();
+  if (!t || t.length > 70) return false;
+  if (/[.!?,;:]$/.test(t)) return false;
+  if (CHAPTER_WORD.test(t)) return true;
+  if (ROMAN_NUMERAL.test(t)) return true;
+  if (/^\d{1,4}\.?$/.test(t)) return true;
+  // WERSALIKI: co najmniej 3 litery, żadnej małej litery wśród liter.
+  const letters = t.replace(/[^\p{L}]/gu, "");
+  if (letters.length >= 3 && letters === letters.toUpperCase() && letters !== letters.toLowerCase()) {
+    return true;
+  }
+  return false;
+}
+
 export async function parseTxt(file: File): Promise<ParsedBook> {
   const text = await file.text();
   const events: BookEvent[] = [];
-  // Akapity rozdzielone pustą linią. Linie zaczynające się od kropki
-  // / kratki / numerów rozdziałów też mogą być rozdziałami — ale na
-  // wejściu mamy zwykły txt, więc bez heurystyk. Wszystko = paragrafy.
   for (const block of text.split(/\r?\n\r?\n+/)) {
     const t = block.replace(/\s+/g, " ").trim();
-    if (t) events.push({ kind: "paragraph", text: t });
+    if (!t) continue;
+    events.push({ kind: looksLikeChapterHeading(t) ? "chapter" : "paragraph", text: t });
   }
   return {
     metadata: {

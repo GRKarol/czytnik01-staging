@@ -232,6 +232,7 @@ export class UpdatesPanel extends LitElement {
     .cta {
       padding: 12px 18px;
       border: 1px solid var(--accent);
+      border-radius: var(--radius-sm, 9px);
       color: #fff;
       background: var(--accent);
       font: 700 0.85rem var(--mn);
@@ -258,6 +259,7 @@ export class UpdatesPanel extends LitElement {
       gap: 10px;
       padding: 14px;
       border: 1px solid var(--line);
+      border-radius: var(--radius, 13px);
       background: var(--paper-tint);
     }
     .release header {
@@ -277,6 +279,7 @@ export class UpdatesPanel extends LitElement {
     }
     .badge {
       padding: 3px 8px;
+      border-radius: var(--radius-pill, 999px);
       background: var(--sky-2);
       color: var(--ink-soft);
       font: 600 0.68rem var(--mn);
@@ -290,6 +293,7 @@ export class UpdatesPanel extends LitElement {
       padding: 10px 12px;
       background: #fff;
       border: 1px solid var(--line);
+      border-radius: var(--radius-sm, 9px);
       font: 0.82rem/1.55 var(--mn);
       color: var(--ink-soft);
       white-space: pre-wrap;
