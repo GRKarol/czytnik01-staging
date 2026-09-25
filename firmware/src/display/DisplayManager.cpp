@@ -3185,12 +3185,28 @@ void DisplayManager::renderScrollView(const std::vector<ContextWord> &words, uin
   const int minScrollOffset = std::min(0, textBottom - contentBottom);
   scrollOffset = std::max(minScrollOffset, std::min(0, scrollOffset));
 
+  // Word text itself is deliberately hashed into the key, not just window
+  // position/count — a transient SD read glitch (IndexedBookStore::wordAt()
+  // failing mid-window) can silently return the same-sized window with blank
+  // word text at the exact same start/current index as before. Without this,
+  // a later successful re-read that fixes the blank words produces an
+  // identical key to the broken frame and never redraws — the screen stays
+  // stuck blank until something else (index, scroll offset, ...) changes.
+  uint32_t wordsFingerprint = 0;
+  for (const ContextWord &word : words) {
+    for (size_t i = 0; i < word.text.length(); ++i) {
+      wordsFingerprint = wordsFingerprint * 31u + static_cast<uint8_t>(word.text[i]);
+    }
+    wordsFingerprint = wordsFingerprint * 31u + (word.paragraphStart ? 1u : 0u);
+  }
+
   const String renderKey =
       "scroll|" + String(contentToken) + "|" + String(windowStartIndex) + "|" +
       String(currentWordIndex) + "|" + String(words.size()) + "|" + String(scrollOffset) +
       "|" + chapterLabel + "|" + String(progressPercent) + "|o:" + overlayText + "|f:" +
       footerStatusLabel + "|b:" + batteryLabel_ + "|rc:" + readerChromeKey(chrome) + "|d:" +
-      String(darkMode_ ? 1 : 0) + "|n:" + String(nightMode_ ? 1 : 0);
+      String(darkMode_ ? 1 : 0) + "|n:" + String(nightMode_ ? 1 : 0) + "|c:" +
+      String(wordsFingerprint);
   if (!initialized_ || renderKey == lastRenderKey_) {
     return;
   }

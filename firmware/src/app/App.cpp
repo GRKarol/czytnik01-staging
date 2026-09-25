@@ -12104,16 +12104,28 @@ void App::updateContextPreviewWindow(size_t currentIndex) {
     startIndex = contextPreviewAnchorIndex(currentIndex);
     endIndex = std::min(wordCount, startIndex + kContextPreviewWindowWords);
     contextPreviewStartIndex_ = startIndex;
-    contextPreviewWindowValid_ = true;
     contextPreviewWords_.clear();
     contextPreviewWords_.reserve(endIndex - startIndex);
+    bool anyWordLoadFailed = false;
     for (size_t index = startIndex; index < endIndex; ++index) {
       DisplayManager::ContextWord word;
       word.text = reader_.wordAt(index);
+      if (word.text.isEmpty()) {
+        // A real empty word shouldn't occur in a valid word index — treat it
+        // as a transient SD read glitch (IndexedBookStore::wordAt() failing
+        // mid-window) rather than genuine content, so the next tick retries
+        // instead of freezing a blank window in as "valid".
+        anyWordLoadFailed = true;
+      }
       word.paragraphStart = isParagraphStart(index);
       word.current = index == currentIndex;
       contextPreviewWords_.push_back(word);
     }
+    // Leave contextPreviewWindowValid_ false on a failed load so the very
+    // next call retries the SD read instead of locking in a blank window
+    // (see DisplayManager::renderScrollView's renderKey word fingerprint for
+    // why a later successful retry must still differ from this one).
+    contextPreviewWindowValid_ = !anyWordLoadFailed;
     contextPreviewCurrentLocalIndex_ =
         currentIndex >= startIndex ? currentIndex - startIndex : static_cast<size_t>(-1);
     return;
