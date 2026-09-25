@@ -51,7 +51,13 @@ constexpr uint32_t kFontDownloadRetryIntervalMs = 60000;
 // jeszcze nie wgrał tego tytułu dla danego języka) to nie błąd, po prostu
 // mniej pozycji w bibliotece na starcie — patrz bookDownloadTask().
 constexpr uint8_t kStarterBookCountPerLanguage = 5;
-constexpr uint32_t kBootSplashMs = 5000;
+// Minimum time the splash artwork stays up once the main loop starts (on
+// top of the black beat below and the two 600 ms fades) — was 5000 ms, an
+// artificial floor that had nothing to do with hardware readiness (all real
+// init already runs synchronously in setup(), before this is even checked);
+// it just made boot feel slow. Trimmed to keep the whole boot sequence
+// (black beat + hold + fade-out + fade-in) close to ~2 s.
+constexpr uint32_t kBootSplashMs = 800;
 constexpr uint32_t kBootSplashBlackMs = 200;
 constexpr uint32_t kBootSplashFadeMs = 600;
 // Extra budget (from bootStartedMs_, not on top of the splash) to let a
@@ -1457,15 +1463,24 @@ void App::updateState(uint32_t nowMs) {
       return;
     }
 
-    // Fade the splash artwork out to black exactly once, right as the hold
-    // time expires — not on every tick spent waiting below for the SD font
-    // retry budget, which would otherwise re-trigger the fade repeatedly
-    // and stack extra delay onto boot. setState() fades back in once the
-    // wizard/reader screen underneath has actually been drawn.
-    if (!bootSplashFadedOut_) {
-      bootSplashFadedOut_ = true;
-      display_.fadeOutBacklight(kBootSplashFadeMs);
-    }
+    // Fade the splash artwork out to black exactly once, right as we're
+    // about to draw the next real screen underneath it — not up front. It
+    // used to run here, before the deferred SD/index book load below, which
+    // meant the backlight sat off (screen genuinely black, not just static)
+    // for however long that load took — worst case several seconds on a
+    // fresh index build or a failed/retried load, stacking silent dead time
+    // onto boot. Calling it right before each setState() instead keeps the
+    // splash fully lit (frozen, since render is suppressed) while that work
+    // happens, so the only guaranteed-black window is the fade transition
+    // itself. bootSplashFadedOut_ still guards it to exactly one call.
+    // setState() fades back in once the wizard/reader screen underneath has
+    // actually been drawn.
+    auto fadeOutSplashOnce = [&]() {
+      if (!bootSplashFadedOut_) {
+        bootSplashFadedOut_ = true;
+        display_.fadeOutBacklight(kBootSplashFadeMs);
+      }
+    };
 
     // Pierwsze uruchomienie po flashowaniu — pokaż welcome wizard zamiast
     // od razu otwierać czytnik. Ważne: ustaw menuScreen_ ZANIM zawołamy
@@ -1482,6 +1497,7 @@ void App::updateState(uint32_t nowMs) {
       // clear the suppress flag set in setup() so SD status text works
       // normally again from here on.
       suppressBootStorageStatusRender_ = false;
+      fadeOutSplashOnce();
       setState(AppState::Menu, nowMs);
       return;
     }
@@ -1491,6 +1507,7 @@ void App::updateState(uint32_t nowMs) {
     if (!tutorialCompleted_) {
       menuScreen_ = MenuScreen::TutorialStep1;
       suppressBootStorageStatusRender_ = false;
+      fadeOutSplashOnce();
       setState(AppState::Menu, nowMs);
       return;
     }
@@ -1506,9 +1523,10 @@ void App::updateState(uint32_t nowMs) {
       return;
     }
 
-    // Do the deferred SD/index book load now, still under the boot splash,
-    // instead of switching to Paused first and showing a separate
-    // "Ładowanie książki" screen while it runs — see loadPendingBootBook().
+    // Do the deferred SD/index book load now, still under the boot splash
+    // (fully lit — see fadeOutSplashOnce() above), instead of switching to
+    // Paused first and showing a separate "Ładowanie książki" screen while
+    // it runs — see loadPendingBootBook().
     loadPendingBootBook(nowMs);
     // loadPendingBootBook() already clears this when it actually ran a
     // load; also clear it here so the no-deferred-load path (built-in demo
@@ -1516,6 +1534,7 @@ void App::updateState(uint32_t nowMs) {
     // text suppressed for the rest of the session.
     suppressBootStorageStatusRender_ = false;
 
+    fadeOutSplashOnce();
     setState((touchPlayHeld_ || playLocked_ || pauseAtSentenceEndRequested_) ? AppState::Playing
                                                                               : AppState::Paused,
              nowMs);
@@ -7841,12 +7860,20 @@ App::TypographyValueEditorSpec App::typographyValueEditorSpec() const {
   TypographyValueEditorSpec spec;
   switch (typographyValueEditorTarget_) {
     case TypographyValueEditorTarget::FontSize: {
+      // readerFontSizeIndex_ is 0=Large/1=Medium/2=Small everywhere else in
+      // the app (readerFontSizeLabel(), the actual point-size lookup, ...).
+      // The slider track fills left-to-right from sliderMin to sliderMax, so
+      // mapping the index straight through put Large on the left and Small
+      // on the right — backwards from what users expect (small on the left,
+      // large on the right). Flip only the slider's own value/labels here;
+      // commitTypographyValueEditorValue() flips it back on the way in, so
+      // readerFontSizeIndex_'s meaning elsewhere is untouched.
       spec.label = uiText(UiText::FontSize);
       spec.sliderMin = 0;
       spec.sliderMax = static_cast<uint16_t>(kReaderFontSizeCount - 1);
-      spec.sliderValue = readerFontSizeIndex_;
+      spec.sliderValue = static_cast<uint16_t>(kReaderFontSizeCount - 1 - readerFontSizeIndex_);
       spec.step = 1;
-      spec.valueLabels = {uiText(UiText::Large), uiText(UiText::Medium), uiText(UiText::Small)};
+      spec.valueLabels = {uiText(UiText::Small), uiText(UiText::Medium), uiText(UiText::Large)};
       return spec;
     }
     case TypographyValueEditorTarget::Tracking: {
@@ -7978,7 +8005,8 @@ void App::applyTypographyValueEditorTouchX(uint16_t x) {
 void App::commitTypographyValueEditorValue(uint16_t sliderValue, uint32_t nowMs) {
   switch (typographyValueEditorTarget_) {
     case TypographyValueEditorTarget::FontSize:
-      readerFontSizeIndex_ = static_cast<uint8_t>(sliderValue);
+      // Inverse of the flip in typographyValueEditorSpec() — see comment there.
+      readerFontSizeIndex_ = static_cast<uint8_t>(kReaderFontSizeCount - 1 - sliderValue);
       preferences_.putUChar(kPrefReaderFontSize, readerFontSizeIndex_);
       applyDisplayPreferences(nowMs);
       return;
@@ -10781,9 +10809,14 @@ void App::loadPendingBootBook(uint32_t nowMs) {
   }
 
   const uint32_t startedMs = millis();
-  const bool allowIndexBuild = pendingBootBookLegacyFallback_;
+  // allowIndexBuild must stay true regardless of pendingBootBookLegacyFallback_:
+  // on a genuinely first-ever boot (fresh SD, no cached index, no saved book
+  // path) tying it to that flag made the very first deferred load always fail
+  // — there was no index yet to "check", and building one wasn't allowed. Every
+  // other loadBookAtIndex() call site in the app (picking a book, book details,
+  // ...) already passes true unconditionally; boot should behave the same way.
   const bool loaded = loadBookAtIndex(pendingBootBookIndex_, nowMs,
-                                      pendingBootBookLegacyFallback_, allowIndexBuild, false,
+                                      pendingBootBookLegacyFallback_, true, false,
                                       false);
   suppressBootStorageStatusRender_ = false;
   const uint32_t elapsedMs = millis() - startedMs;
