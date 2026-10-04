@@ -26,6 +26,7 @@ import {
   type BatteryLabel,
   type WifiStationConfig,
   type PluginInfo,
+  type PluginFiles,
   type DeviceLogTail,
   type BookPosition,
   type DeviceCapabilities,
@@ -96,7 +97,7 @@ interface FirmwareSettings {
   options?: ReaderOptions;
 }
 
-function fromFirmware(fw: FirmwareSettings): DeviceSettings {
+export function fromFirmware(fw: FirmwareSettings): DeviceSettings {
   const d = fw.display ?? {};
   const r = fw.reading ?? {};
   const p = r.pacing ?? {};
@@ -136,7 +137,8 @@ function fromFirmware(fw: FirmwareSettings): DeviceSettings {
     scrollLineSpacing: sc.scrollLineSpacing ?? DEFAULT_SETTINGS.scrollLineSpacing,
     scrollMargin: sc.scrollMargin ?? DEFAULT_SETTINGS.scrollMargin,
     // Typography (RSVP)
-    fontSizeIndex: d.fontSizeIndex ?? DEFAULT_SETTINGS.fontSizeIndex,
+    // The reader counts 0 = large, 2 = small; the app shows S/M/L as 0/1/2.
+    fontSizeIndex: typeof d.fontSizeIndex === "number" ? 2 - d.fontSizeIndex : DEFAULT_SETTINGS.fontSizeIndex,
     typeface: t.typeface ?? DEFAULT_SETTINGS.typeface,
     typefaceIndex:
       t.typefaceIndex ??
@@ -157,7 +159,7 @@ function fromFirmware(fw: FirmwareSettings): DeviceSettings {
   };
 }
 
-function toFirmware(p: Partial<DeviceSettings>): Record<string, unknown> {
+export function toFirmware(p: Partial<DeviceSettings>): Record<string, unknown> {
   // applySettingsJson w firmware czyta po nazwie klucza (nie po sekcji),
   // więc możemy spłaszczyć payload.
   const out: Record<string, unknown> = {};
@@ -193,7 +195,7 @@ function toFirmware(p: Partial<DeviceSettings>): Record<string, unknown> {
   if (p.scrollLineSpacing != null) out.scrollLineSpacing = p.scrollLineSpacing;
   if (p.scrollMargin != null) out.scrollMargin = p.scrollMargin;
   // Typography (RSVP)
-  if (p.fontSizeIndex != null) out.fontSizeIndex = p.fontSizeIndex;
+  if (p.fontSizeIndex != null) out.fontSizeIndex = 2 - p.fontSizeIndex;
   if (p.typeface != null) out.typeface = p.typeface;
   if (p.typefaceIndex != null) out.typefaceIndex = p.typefaceIndex;
   if (p.phantomWords != null) out.phantomWords = p.phantomWords;
@@ -374,6 +376,48 @@ export class HttpDeviceApi implements DeviceApi {
   async getPlugins(): Promise<PluginInfo[]> {
     const data = await this.json<{ plugins: PluginInfo[] }>(await fetch(this.url("/api/plugins"), { signal: timed() }));
     return data.plugins;
+  }
+
+  private async putPlugins(body: Record<string, unknown>): Promise<PluginInfo[]> {
+    const res = await fetch(this.url("/api/plugins"), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: timed(),
+    });
+    return (await this.json<{ plugins: PluginInfo[] }>(res)).plugins;
+  }
+
+  setPluginActive(id: string, active: boolean): Promise<PluginInfo[]> {
+    return this.putPlugins({ id, active });
+  }
+
+  setPluginOrder(ids: string[]): Promise<PluginInfo[]> {
+    return this.putPlugins({ order: ids.join(",") });
+  }
+
+  async listPluginFiles(id: string): Promise<PluginFiles> {
+    return this.json<PluginFiles>(
+      await fetch(this.url(`/api/plugins/files?id=${encodeURIComponent(id)}`), { signal: timed() }),
+    );
+  }
+
+  async getPluginFile(id: string, name: string): Promise<Blob> {
+    // No short timeout: a long recording takes a while over the reader's Wi-Fi.
+    const res = await fetch(
+      this.url(`/api/plugins/file?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`),
+    );
+    if (!res.ok) await this.json(res);
+    return res.blob();
+  }
+
+  async deletePluginFile(id: string, name: string): Promise<void> {
+    await this.json(
+      await fetch(this.url(`/api/plugins/file?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`), {
+        method: "DELETE",
+        signal: timed(),
+      }),
+    );
   }
 
   async setWifiTimeoutSeconds(seconds?: number): Promise<number> {

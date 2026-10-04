@@ -1,11 +1,21 @@
 import { LitElement, css, html, svg, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import { tr } from "../i18n/index";
+import { LANG_NAMES, SUPPORTED_LANGS, chooseLang, chosenLang, tr, type SupportedLang } from "../i18n/index";
 import type { PwaInstallDialog } from "./pwa-install-dialog.element";
 import { dandelionIcon } from "./flower-icon";
 
 const STORAGE_KEY = "flower.onboarded.v1";
+// Set once the language question on the first launch has an answer.
+const LANG_ASKED_KEY = "flower.langAsked.v1";
+
+function langAsked(): boolean {
+  try {
+    return !!localStorage.getItem(LANG_ASKED_KEY) || chosenLang() !== null;
+  } catch {
+    return true;
+  }
+}
 
 /**
  * Pełnoekranowy pierwszorazowy wizard. Pokazuje się raz po otwarciu
@@ -22,10 +32,12 @@ export class OnboardingWizard extends LitElement {
   @state() private dismissed = false;
   @state() private installAvailable = false;
   @state() private isStandalone = false;
+  @state() private askLang = false;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.dismissed = !!localStorage.getItem(STORAGE_KEY);
+    this.askLang = !langAsked();
 
     this.isStandalone =
       window.matchMedia("(display-mode: standalone)").matches ||
@@ -44,6 +56,7 @@ export class OnboardingWizard extends LitElement {
   };
 
   render() {
+    if (this.askLang) return this.renderLanguage();
     if (this.dismissed) return null;
     return html`
       <div class="overlay">
@@ -67,6 +80,37 @@ export class OnboardingWizard extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  /** First launch: the language comes before anything else, no skipping. */
+  private renderLanguage(): TemplateResult {
+    return html`
+      <div class="overlay">
+        <div class="card">
+          <div class="stage">
+            <div class="hero">${this.flower(96)}</div>
+            <h2>${tr("onb.lang.title")}</h2>
+            <p>${tr("onb.lang.text")}</p>
+            <div class="langs">
+              ${SUPPORTED_LANGS.map(
+                (lang) => html`<button class="lang" @click=${() => this.pickLang(lang)}>${LANG_NAMES[lang]}</button>`,
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private pickLang(lang: SupportedLang) {
+    try {
+      localStorage.setItem(LANG_ASKED_KEY, lang);
+    } catch {
+      /* asked again next launch */
+    }
+    this.askLang = false;
+    // Re-renders the whole app in the new language.
+    chooseLang(lang);
   }
 
   private renderStep(): TemplateResult {
@@ -278,6 +322,28 @@ export class OnboardingWizard extends LitElement {
       letter-spacing: 0.02em;
       cursor: pointer;
       padding: 8px 4px;
+    }
+    .langs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      width: 100%;
+      margin-top: 8px;
+    }
+    .lang {
+      padding: 14px 10px;
+      border: 1px solid #1488d8;
+      border-radius: 10px;
+      color: inherit;
+      background: transparent;
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .lang:active {
+      background: #1488d8;
+      color: #fff;
     }
     .cta {
       padding: 12px 22px;

@@ -57,6 +57,14 @@ declare -A FONT_LABELS=(
 # flash-resident fonts (Atkinson/Serif) — see docs/PLAN_FONTY_NA_SD.md.
 TARGET_HEIGHT_BASE=52
 TARGET_HEIGHT_70=39
+# Letter size (mean of x-height and cap height, px) of Atkinson, the default
+# reading face, at 72 pt (large) and 44 pt (medium). Calibrating on the full
+# ink span instead left some families at half Atkinson's letter size.
+TARGET_OPTICAL_BASE=41.5
+TARGET_OPTICAL_70=25.5
+# File name suffix: firmware asks for <name>-v2.fnt, so readers holding the
+# older, smaller files download these (DisplayManager sdFontBaseName).
+PACK_SUFFIX="-v2"
 
 for name in "${!FONT_URLS[@]}"; do
   url="https://raw.githubusercontent.com/google/fonts/main/${FONT_URLS[$name]}"
@@ -67,11 +75,13 @@ done
 for name in "${!FONT_URLS[@]}"; do
   label="${FONT_LABELS[$name]}"
   python3 "$SCRIPT_DIR/generate_embedded_font.py" "$SRC_DIR/$name.ttf" \
-    --symbol-prefix "Tmp" --fnt-output "$OUT_DIR/${name}.fnt" \
-    --font-label "$label" --target-height "$TARGET_HEIGHT_BASE"
+    --symbol-prefix "Tmp" --fnt-output "$OUT_DIR/${name}${PACK_SUFFIX}.fnt" \
+    --font-label "$label" --target-height "$TARGET_HEIGHT_BASE" \
+    --target-optical "$TARGET_OPTICAL_BASE"
   python3 "$SCRIPT_DIR/generate_embedded_font.py" "$SRC_DIR/$name.ttf" \
-    --symbol-prefix "Tmp70" --fnt-output "$OUT_DIR/${name}_70.fnt" \
-    --font-label "$label" --target-height "$TARGET_HEIGHT_70"
+    --symbol-prefix "Tmp70" --fnt-output "$OUT_DIR/${name}${PACK_SUFFIX}_70.fnt" \
+    --font-label "$label" --target-height "$TARGET_HEIGHT_70" \
+    --target-optical "$TARGET_OPTICAL_70"
 done
 
 echo "done: $(ls "$OUT_DIR"/*.fnt | wc -l) .fnt files in $OUT_DIR"

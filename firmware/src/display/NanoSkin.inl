@@ -1941,8 +1941,9 @@ void DisplayManager::nanoLayoutChip(const ui::Rect &rect, bool compact, bool rai
   }
 }
 
-void DisplayManager::nanoReadingThemeChip(const ui::Rect &rect, uint8_t theme, const String &name, bool selected,
-                                          bool pressed) {
+void DisplayManager::nanoReadingThemeChip(const ui::Rect &rect, uint8_t theme, const String &name,
+                                          const String &sampleHead, const String &sampleFocus,
+                                          const String &sampleTail, bool selected, bool pressed) {
   uint16_t background = 0;
   uint16_t word = 0;
   uint16_t focus = 0;
@@ -1967,9 +1968,9 @@ void DisplayManager::nanoReadingThemeChip(const ui::Rect &rect, uint8_t theme, c
   const int baseHeight = std::max(1, baseGlyphHeightForTypeface(face));
   const int wordAreaH = h - 26;
   uint8_t scale = static_cast<uint8_t>(std::max(12, std::min(60, (wordAreaH - 16) * 100 / baseHeight)));
-  const String left = "czy";
-  const String mid = "t";
-  const String right = "aj";
+  const String &left = sampleHead;
+  const String &mid = sampleFocus;
+  const String &right = sampleTail;
   while (scale > 12 && nanoTypefaceTextWidth(left + mid + right, scale) > w - 24) {
     scale = static_cast<uint8_t>(scale - 2);
   }

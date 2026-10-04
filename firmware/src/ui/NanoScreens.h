@@ -563,6 +563,7 @@ struct WizardChip {
   DisplayManager::ReaderTypeface typeface = DisplayManager::ReaderTypeface::Count;  // Typeface
   String detail;        // Book: author
   uint8_t family = 0;   // UiFont: DisplayManager::nanoUiFontName index
+  bool disabled = false;  // Typeface: still downloading, drawn dimmed, no target
 };
 struct WizardView {
   size_t step = 0;  // 0-based

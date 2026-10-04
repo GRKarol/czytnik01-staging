@@ -106,6 +106,9 @@ class StorageManager {
   StatusCallback statusCallback_ = nullptr;
   void *statusContext_ = nullptr;
   std::vector<String> bookPaths_;
-  std::vector<String> bookTitles_;
-  std::vector<String> bookAuthors_;
+  // Filled by rebuildBookMetadataCache(); bookDisplayName() fills a title
+  // that came back empty (file busy during a download) on first use.
+  mutable std::vector<String> bookTitles_;
+  mutable std::vector<bool> bookTitleRetried_;
+  mutable std::vector<String> bookAuthors_;
 };

@@ -70,6 +70,12 @@ bool SdFontLoader::load(const String &path) {
   unload();
 
   File file = SD_MMC.open(path);
+  if (!file && SD_MMC.exists(path)) {
+    // There but not opened: every file handle busy for a moment (a download
+    // writing, the app sending a book). One more try before giving up.
+    delay(30);
+    file = SD_MMC.open(path);
+  }
   if (!file || file.isDirectory()) {
     Serial.printf("[sdfont] not found: %s\n", path.c_str());
     status_ = Status::FileNotFound;

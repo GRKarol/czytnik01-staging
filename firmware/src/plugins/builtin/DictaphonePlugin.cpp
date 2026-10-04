@@ -68,6 +68,9 @@ enum class DictStr : uint8_t {
     RecordingFailed,
     TryAgain,
     PeakAbbrev,
+    Stop,
+    CardWriteFailed,
+    Recording,
 };
 
 const char* dictText(PluginDisplayService* display, DictStr key, int lang) {
@@ -99,17 +102,15 @@ void DictaphoneCore::update(uint32_t nowMs) {
     // Auto-stop recording at max duration (handled by AudioRecorder but also check here)
     if (screen_ == Screen::Recording && audio_ && audio_->isRecording) {
         if (!audio_->isRecording()) {
-            // Recording stopped externally (max duration reached or error)
-            // Add the file to our recordings list
-            if (currentRecordingName_[0] != '\0' && recordingCount_ < kDictMaxRecordings) {
-                strncpy(recordingNames_[recordingCount_], currentRecordingName_, kDictMaxFilenameLen - 1);
-                recordingNames_[recordingCount_][kDictMaxFilenameLen - 1] = '\0';
-                recordingCount_++;
-                saveIndex();
-            }
-            currentRecordingName_[0] = '\0';
-            goToScreen(Screen::Library);
+            // Stopped on its own: the length limit, or the recorder gave up
+            // (no file on the card, codec silent). Only a take that reached
+            // the card goes on the list.
+            finishRecording(nowMs);
         }
+    }
+
+    if (screen_ == Screen::Error && nowMs - errorShownMs_ >= kErrorShowMs) {
+        goToScreen(Screen::Main);
     }
 
     // Auto-return when playback finishes
@@ -215,6 +216,10 @@ void DictaphoneCore::handleTouch(const PluginTouchEvent* event) {
             stopRecording();
             break;
         }
+
+        case Screen::Error:
+            goToScreen(Screen::Main);
+            break;
 
         case Screen::Library: {
             if (recordingCount_ == 0) {
@@ -323,7 +328,6 @@ void DictaphoneCore::handleTouch(const PluginTouchEvent* event) {
                 goToScreen(Screen::Library);
             } else {
                 deleteRecording(deleteIndex_);
-                scanRecordings();
                 if (librarySelected_ >= recordingCount_ && recordingCount_ > 0) {
                     librarySelected_ = recordingCount_ - 1;
                 }
@@ -433,6 +437,7 @@ void DictaphoneCore::draw() {
         case Screen::Playing:       drawPlaying(); break;
         case Screen::Rename:        drawRename(); break;
         case Screen::ConfirmDelete: drawConfirmDelete(); break;
+        case Screen::Error:         drawError(); break;
     }
 }
 
@@ -475,12 +480,16 @@ void DictaphoneCore::drawRecording() {
     if (audio_ && audio_->recordingPeakLevel) {
         peak = audio_->recordingPeakLevel();
     }
-    char label[24];
-    snprintf(label, sizeof(label), "%s %s:%u%%", timeBuf, dictText(display_, DictStr::PeakAbbrev, lang),
-             static_cast<unsigned>(peak));
+    // The take is running: both halves stop it, and neither may read like
+    // the Record button of the screen before (a second "record" tap ended
+    // the take a moment after it began).
+    char left[40];
+    snprintf(left, sizeof(left), "%s  %s", dictText(display_, DictStr::Stop, lang), timeBuf);
+    char right[40];
+    snprintf(right, sizeof(right), "%s  %s %u%%", dictText(display_, DictStr::Recording, lang),
+             dictText(display_, DictStr::PeakAbbrev, lang), static_cast<unsigned>(peak));
 
-    display_->renderButtonPair(label, PLUGIN_ICON_STOP, true, dictText(display_, DictStr::Library, lang),
-                                PLUGIN_ICON_BOOK);
+    display_->renderButtonPair(left, PLUGIN_ICON_STOP, true, right, PLUGIN_ICON_RECORD);
 }
 
 void DictaphoneCore::drawLibrary() {
@@ -677,6 +686,19 @@ void DictaphoneCore::handleRenameTouch(const PluginTouchEvent* event) {
     (void)x;
 }
 
+void DictaphoneCore::drawError() {
+    if (!display_->renderStatus) return;
+    const int lang = display_->languageIndex ? display_->languageIndex() : 0;
+    display_->renderStatus(dictText(display_, DictStr::ErrorTitle, lang),
+                           dictText(display_, DictStr::RecordingFailed, lang),
+                           dictText(display_, DictStr::CardWriteFailed, lang));
+}
+
+void DictaphoneCore::showError(uint32_t nowMs) {
+    errorShownMs_ = nowMs;
+    goToScreen(Screen::Error);
+}
+
 void DictaphoneCore::drawConfirmDelete() {
     if (!display_->renderButtonPair) return;
 
@@ -728,17 +750,33 @@ void DictaphoneCore::stopRecording() {
     if (!audio_ || !audio_->stopRecording) return;
 
     audio_->stopRecording();
+    finishRecording(lastUpdateMs_);
+}
 
-    // Add the newly recorded file to our recordings list and index
+void DictaphoneCore::finishRecording(uint32_t nowMs) {
+    // Listed only when the file is really on the card. A take whose file
+    // never opened used to be listed anyway: the row played nothing, and the
+    // next delete rescanned the card and wiped every such row at once.
+    bool kept = false;
     if (currentRecordingName_[0] != '\0' && recordingCount_ < kDictMaxRecordings) {
-        strncpy(recordingNames_[recordingCount_], currentRecordingName_, kDictMaxFilenameLen - 1);
-        recordingNames_[recordingCount_][kDictMaxFilenameLen - 1] = '\0';
-        recordingCount_++;
-        saveIndex();
+        char path[kDictMaxFilenameLen + 16];
+        snprintf(path, sizeof(path), "recordings/%s", currentRecordingName_);
+        if (storage_ && storage_->fileExists && storage_->fileExists(path)) {
+            strncpy(recordingNames_[recordingCount_], currentRecordingName_, kDictMaxFilenameLen - 1);
+            recordingNames_[recordingCount_][kDictMaxFilenameLen - 1] = '\0';
+            librarySelected_ = recordingCount_;
+            recordingCount_++;
+            saveIndex();
+            kept = true;
+        }
     }
     currentRecordingName_[0] = '\0';
 
-    goToScreen(Screen::Library);
+    if (kept) {
+        goToScreen(Screen::Library);
+    } else {
+        showError(nowMs);
+    }
 }
 
 void DictaphoneCore::startPlayback(uint8_t index) {
@@ -872,12 +910,18 @@ bool DictaphoneCore::deleteRecording(uint8_t index) {
     char path[kDictMaxFilenameLen + 16];
     snprintf(path, sizeof(path), "recordings/%s", recordingNames_[index]);
 
-    bool result = storage_->deleteFile(path);
-    if (result) {
-        // Update index
-        saveIndex();
+    // A file already gone from the card still leaves the list. The row goes
+    // on its own; the old code rescanned the whole card after a delete, and
+    // any row whose file could not be found went with it.
+    const bool removed =
+        storage_->deleteFile(path) || !(storage_->fileExists && storage_->fileExists(path));
+    if (!removed) return false;
+    for (uint8_t i = index; i + 1 < recordingCount_; ++i) {
+        memcpy(recordingNames_[i], recordingNames_[i + 1], kDictMaxFilenameLen);
     }
-    return result;
+    --recordingCount_;
+    saveIndex();
+    return true;
 }
 
 bool DictaphoneCore::renameRecording(uint8_t index, const char* newName) {

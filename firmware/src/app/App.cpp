@@ -339,6 +339,11 @@ constexpr size_t kSettingsConnBluetoothIndex = 99;  // not shown
 constexpr size_t kSettingsConnSyncToggleIndex = 2;  // Synchronizacja z telefonem
 constexpr size_t kSettingsConnUsbIndex = 3;         // Kopiuj przez USB
 #endif
+#if RSVP_USB_TRANSFER_ENABLED
+constexpr size_t kSettingsConnWifiSessionIndex = kSettingsConnUsbIndex + 1;
+#else
+constexpr size_t kSettingsConnWifiSessionIndex = kSettingsConnUsbIndex;
+#endif
 
 // SettingsAbout items
 constexpr size_t kSettingsAboutVersionIndex = 1;   // tap-target dla dev mode
@@ -420,8 +425,9 @@ constexpr size_t kScreensaverSettingsSleepGuardIndex = 4;
 constexpr size_t kScreensaverSettingsPreviewIndex = 5;
 
 // Screensaver timeout values in minutes: 1, 2, 3, 5, 10, 15, 20, 30
-constexpr uint8_t kScreensaverTimeoutCount = 8;
-constexpr uint16_t kScreensaverTimeoutMinutes[] = {1, 2, 3, 5, 10, 15, 20, 30};
+// The last value, 0, turns the screensaver off: the screen stays as it is.
+constexpr uint8_t kScreensaverTimeoutCount = 9;
+constexpr uint16_t kScreensaverTimeoutMinutes[] = {1, 2, 3, 5, 10, 15, 20, 30, 0};
 
 // Screensaver auto-off values in minutes: 0=Never, 5, 10, 15, 20, 30, 45, 60
 constexpr uint8_t kScreensaverAutoOffCount = 8;
@@ -511,6 +517,13 @@ constexpr const char *kPrefOtaChannel = "ota_channel";
 constexpr const char *kOtaStagingRepo = "czytnik01-staging";
 constexpr const char *kPrefDevMode = "dev_mode";
 constexpr const char *kPrefBleEnabled = "ble_on";
+// Phone network (the app's AP) after boot: 0 = 30 s, 1 = the whole session,
+// 2..4 = automatic: back on when reading stops, off after 10/20/30 s of
+// reading. Shared with CompanionSyncManager ("wifiSession").
+constexpr const char *kPrefWifiSession = "wifi_sess";
+constexpr uint8_t kWifiSessionStandard = 0;
+constexpr uint8_t kWifiSessionWhole = 1;
+constexpr uint8_t kWifiSessionModeCount = 5;
 constexpr const char *kPrefShowHelpHints = "help_hints";  // default on: the ? buttons
 constexpr const char *kPrefNavMode = "nav_mode";
 constexpr size_t kReaderFontSizeCount = 3;
@@ -520,7 +533,7 @@ constexpr uint32_t kNoSavedWordIndex = 0xFFFFFFFFUL;
 constexpr uint16_t kPacingDelayMinMs = 0;
 constexpr uint16_t kPacingDelayMaxMs = 600;
 constexpr uint16_t kPacingDelayStepMs = 50;
-constexpr uint16_t kDefaultPacingDelayMs = 200;
+constexpr uint16_t kDefaultPacingDelayMs = 50;
 // Geometry of the PacingDelayEditor slider button — shared by
 // App::renderPacingDelayEditor() (draws it) and
 // App::applyPacingDelayEditorTouchX() (hit-tests drags against it), both of
@@ -1145,7 +1158,12 @@ void App::begin() {
   }
 
   // Auto-start companion sync AP for 30 seconds on boot.
-  // If no client connects within the timeout, AP shuts down to save power.
+  // If no client connects within the timeout, AP shuts down to save power
+  // (unless the Wi-Fi session setting keeps it up, see sessionWifiHold()).
+  wifiSessionMode_ = preferences_.getUChar(kPrefWifiSession, kWifiSessionStandard);
+  if (wifiSessionMode_ >= kWifiSessionModeCount) {
+    wifiSessionMode_ = kWifiSessionStandard;
+  }
   {
     CompanionSyncManager::Config syncConfig;
     syncConfig.wifiSsid = "";
@@ -1263,6 +1281,8 @@ void App::update(uint32_t nowMs) {
     return;
   }
   // ── End plugin running block ───────────────────────────────────────────
+  // The phone app may have switched plugins on/off or reordered them.
+  pluginLibrary_.refreshIfStale();
 
   const bool standbyComboConsumed = handleStandbyCombo(nowMs);
   if (!standbyComboConsumed) {
@@ -1324,11 +1344,16 @@ void App::update(uint32_t nowMs) {
   updateReader(nowMs);
   handleTouch(nowMs);
   updateGridToastOverlay(nowMs);
+  updateSdCardSetup(nowMs);
+  updateCardReaderDim(nowMs);
 
   // Screensaver idle timeout: activate screensaver if user hasn't interacted
+  // Never inside the first-run wizard: the downloads there run for minutes
+  // with nobody touching the screen, and the page has to stay readable.
   if (lastActivityMs_ > 0 && state_ != AppState::Booting &&
       state_ != AppState::UsbTransfer && state_ != AppState::CompanionSync &&
-      state_ != AppState::Sleeping && !powerOffStarted_) {
+      state_ != AppState::Sleeping && !powerOffStarted_ && savedWizardStep_ == 0xFF &&
+      menuScreen_ != MenuScreen::SdCardSetup && !cardReaderMode_) {
     const uint32_t timeoutMs =
         static_cast<uint32_t>(kScreensaverTimeoutMinutes[screensaverTimeoutIndex_]) * 60000UL;
     const uint32_t elapsed = nowMs - lastActivityMs_;
@@ -1347,7 +1372,8 @@ void App::update(uint32_t nowMs) {
       }
     } else if (state_ == AppState::Paused || state_ == AppState::Menu) {
       // Normal idle timeout: enter screensaver when paused/menu idle
-      if (elapsed >= timeoutMs) {
+      // (timeoutMs 0 = screensaver turned off).
+      if (timeoutMs > 0 && elapsed >= timeoutMs) {
         Serial.println("[app] idle timeout: entering standby screensaver");
         enterStandby(nowMs);
         return;
@@ -1380,6 +1406,12 @@ void App::update(uint32_t nowMs) {
     }
   }
 
+  // Settings written over Bluetooth while the phone network is off: the
+  // auto-sync branch below only runs with that network up.
+  if (!autoSyncActive_ && state_ != AppState::CompanionSync) {
+    applyCompanionChanges(nowMs);
+  }
+
   if (ble_.consumeMenuDirty() && state_ == AppState::Menu &&
       menuScreen_ == MenuScreen::SettingsConnectivity) {
     rebuildSettingsMenuItems();
@@ -1409,7 +1441,17 @@ void App::update(uint32_t nowMs) {
     if (state_ == AppState::Menu && menuScreen_ == MenuScreen::WelcomeAppPairing) {
       autoSyncStartedMs_ = nowMs;
     }
-    if (!autoSyncClientConnected_ && !firstSessionSyncHold_ && (nowMs - autoSyncStartedMs_ >= 30000)) {
+    // Automatic mode: the network goes away once a book has been playing
+    // for the chosen time, and comes back when reading stops (setState).
+    const uint32_t autoOffMs = sessionWifiAutoOffMs();
+    if (autoOffMs > 0 && !firstSessionSyncHold_ && state_ == AppState::Playing &&
+        nowMs - playingSinceMs_ >= autoOffMs) {
+      Serial.printf("[app] wifi session: %lu s of reading, network off\n",
+                    static_cast<unsigned long>(autoOffMs / 1000));
+      companionSync_.end();
+      autoSyncActive_ = false;
+      autoSyncClientConnected_ = false;
+    } else if (!autoSyncClientConnected_ && !sessionWifiHold() && (nowMs - autoSyncStartedMs_ >= 30000)) {
       Serial.println("[app] auto-sync: 30s timeout, no client — shutting down AP");
       companionSync_.end();
       autoSyncActive_ = false;
@@ -1540,6 +1582,11 @@ void App::setState(AppState nextState, uint32_t nowMs) {
   if (state_ == AppState::Paused && previousState == AppState::Playing) {
     saveReadingPosition(true);
   }
+  if (state_ == AppState::Playing) {
+    playingSinceMs_ = nowMs;
+  } else if (previousState == AppState::Playing && sessionWifiAutoOffMs() > 0) {
+    resumeSessionWifi("reading stopped");
+  }
 
   ESP_LOGI(kAppTag, "state -> %s", stateName(state_));
   Serial.printf("[app] state -> %s at %lu ms\n", stateName(state_),
@@ -1591,6 +1638,16 @@ void App::updateState(uint32_t nowMs) {
     if (!tutorialCompleted_) {
       menuScreen_ = MenuScreen::TutorialStep1;
       tutorialPage_ = 0;
+      suppressBootStorageStatusRender_ = false;
+      beginSplashHandoff();
+      setState(AppState::Menu, nowMs);
+      endSplashHandoff();
+      return;
+    }
+
+    // The card: unreadable, or new and without the reader's files, gets its
+    // screen before any book opens (AppSdSetup.inl).
+    if (!sdSetupChecked_ && checkSdCardAtBoot(nowMs)) {
       suppressBootStorageStatusRender_ = false;
       beginSplashHandoff();
       setState(AppState::Menu, nowMs);
@@ -1964,6 +2021,7 @@ void App::toggleMenuFromPowerButton(uint32_t nowMs) {
           menuScreen_ == MenuScreen::WelcomeMenuFont ||
           menuScreen_ == MenuScreen::WelcomeFont ||
           menuScreen_ == MenuScreen::WelcomeLibrary ||
+          menuScreen_ == MenuScreen::SdCardSetup ||
           (menuScreen_ == MenuScreen::WifiNetworks && wifiFlowFromWizard_)) {
         // Kreatora pierwszego uruchomienia nie da się już pominąć jednym
         // kliknięciem PWR — krótkie kliknięcie cofa o krok, tak jak Back
@@ -2083,6 +2141,10 @@ void App::applyHandednessSettings(uint32_t nowMs, bool rerender) {
 }
 
 void App::reloadRuntimePreferences(uint32_t nowMs, bool rerender) {
+  wifiSessionMode_ = preferences_.getUChar(kPrefWifiSession, wifiSessionMode_);
+  if (wifiSessionMode_ >= kWifiSessionModeCount) {
+    wifiSessionMode_ = kWifiSessionStandard;
+  }
   brightnessLevelIndex_ = preferences_.getUChar(kPrefBrightness, brightnessLevelIndex_);
   if (brightnessLevelIndex_ >= kBrightnessLevelCount) {
     brightnessLevelIndex_ = kBrightnessLevelCount - 1;
@@ -2940,6 +3002,9 @@ void App::handleTouch(uint32_t nowMs) {
   }
 
   lastActivityMs_ = nowMs;
+  if (wakeCardReaderScreen(ev)) {
+    return;
+  }
 
   Serial.printf("[touch] phase=%s touched=%u x=%u y=%u gesture=%u state=%s\n",
                 touchPhaseName(ev.phase), ev.touched ? 1 : 0, ev.x, ev.y, ev.gesture,
@@ -3361,7 +3426,7 @@ void App::applyMenuTouchGesture(const TouchEvent &event, uint32_t nowMs) {
   // First-run wizard pages (Nano skin): chips, Wstecz, Dalej, Podgląd.
   if (wizardNanoScreen()) {
     if (absDeltaX <= static_cast<int>(kTapSlopPx) && absDeltaY <= static_cast<int>(kTapSlopPx)) {
-      handleWizardTouchAt(event.x, event.y, nowMs);
+      handleWizardTouchAt(event.x, event.y, pausedTouch_.startMs, nowMs);
     }
     return;
   }
@@ -5532,20 +5597,41 @@ bool App::attemptWifiConnection(const String &ssid, const String &password, uint
   OtaUpdater::Config config;
   config.wifiSsid = ssid;
   config.wifiPassword = password;
-  const bool connected = otaUpdater_.connectWiFi(config, &App::handleStorageStatus, this);
+  // The phone-sync network holds the radio in AP mode: a station attempt
+  // would be refused, so it goes first (it comes back from the sync screen).
+  stopAutoSyncAccessPoint("wifi connect attempt");
+  OtaUpdater::WifiFailure failure = OtaUpdater::WifiFailure::None;
+  const bool connected = otaUpdater_.connectWiFiUserAttempt(config, failure, &App::handleStorageStatus, this);
   if (connected) {
-    // Na błędzie connectWiFi() już posprzątała i zwolniła sesję sama (patrz
-    // komentarz w OtaUpdater::connectWiFi) — drugie wołanie tutaj otwierało
-    // okno na wyścig z inną sesją WiFi (np. w tle działającym OTA-checkiem).
+    // Na błędzie connectWiFiUserAttempt() już posprzątała i zwolniła sesję
+    // sama — drugie wołanie tutaj otwierało okno na wyścig z inną sesją WiFi
+    // (np. w tle działającym OTA-checkiem).
     otaUpdater_.disconnectWiFi();
   }
 
   if (connected) {
     renderWifiStatus(tr(TrKey::Connected), ssid);
   } else {
-    renderWifiStatus(tr2(TrKey2::ConnectFailedCheckPassword), ssid);
+    // The router's own answer, not a guess: wrong password, the network out
+    // of range, or no answer at all.
+    String reason;
+    switch (failure) {
+      case OtaUpdater::WifiFailure::WrongPassword:
+        reason = tr4(TrKey4::WifiFailPassword);
+        break;
+      case OtaUpdater::WifiFailure::NotFound:
+        reason = tr4(TrKey4::WifiFailNotFound);
+        break;
+      case OtaUpdater::WifiFailure::Busy:
+        reason = tr4(TrKey4::WifiFailBusy);
+        break;
+      default:
+        reason = tr4(TrKey4::WifiFailNoAnswer);
+        break;
+    }
+    renderWifiStatus(reason, ssid);
   }
-  delay(1200);
+  delay(connected ? 1200 : 2200);
   return connected;
 }
 
@@ -6115,8 +6201,18 @@ void App::selectTypographyFontPickerItem(uint32_t nowMs) {
   applyTypographySettings(nowMs);
 
   if (display_.consumeFontLoadFailure()) {
-    display_.renderStatus("Font", "Not found on SD", "Using Atkinson");
-    delay(1400);
+    // A damaged file is gone from the card now: the pack is incomplete
+    // again and the background download fetches it on its next try.
+    const bool damaged = DisplayManager::lastFontLoadDamaged();
+    refreshFontPackComplete();
+    lastFontDownloadAttemptMs_ = 0;
+    display_.renderStatus(typefaceDisplayName(typographyConfig_.typeface),
+                          damaged ? tr4(TrKey4::FontDamaged) : tr4(TrKey4::FontMissing),
+                          tr4(TrKey4::FontUsingAtkinson));
+    delay(1800);
+    if (damaged && typographyFontPickerSelectedIndex_ < typographyFontPickerTypefaceForIndex_.size()) {
+      openTypographyFontPicker();
+    }
   }
 
   if (wizardFontPickerActive_) {
@@ -6193,6 +6289,8 @@ void App::rebuildSettingsMenuItems() {
     // 4. Kopiuj przez USB
     settingsMenuItems_.push_back(uiText(UiText::UsbTransfer));
 #endif
+    // 5. Wi-Fi for the app after boot: 30 s / whole session / automatic
+    settingsMenuItems_.push_back(String(tr4(TrKey4::WifiSessionColon)) + wifiSessionLabel());
   } else if (menuScreen_ == MenuScreen::DeviceHome) {
     rebuildDeviceHomeItems();
   } else if (menuScreen_ == MenuScreen::NanoThemes) {
@@ -6508,8 +6606,67 @@ void App::selectSettingsConnectivityItem(uint32_t nowMs) {
       enterUsbTransfer(nowMs);
       return;
 #endif
+    case kSettingsConnWifiSessionIndex:
+      wifiSessionMode_ = static_cast<uint8_t>((wifiSessionMode_ + 1) % kWifiSessionModeCount);
+      preferences_.putUChar(kPrefWifiSession, wifiSessionMode_);
+      Serial.printf("[app] wifi session mode -> %u\n", wifiSessionMode_);
+      // Whole session / automatic: the network comes up right away, so the
+      // app can connect without a restart.
+      if (sessionWifiHold()) {
+        resumeSessionWifi("wifi session setting");
+      }
+      rebuildSettingsMenuItems();
+      showGridToast(settingsMenuItems_[settingsSelectedIndex_], nowMs);
+      renderSettings();
+      return;
     default:
       return;
+  }
+}
+
+// ─── Wi-Fi session (phone network after boot) ────────────────────────────────
+
+bool App::sessionWifiHold() const {
+  return firstSessionSyncHold_ || wifiSessionMode_ != kWifiSessionStandard;
+}
+
+uint32_t App::sessionWifiAutoOffMs() const {
+  if (wifiSessionMode_ <= kWifiSessionWhole || wifiSessionMode_ >= kWifiSessionModeCount) {
+    return 0;
+  }
+  return static_cast<uint32_t>(wifiSessionMode_ - kWifiSessionWhole) * 10000UL;
+}
+
+String App::wifiSessionLabel() const {
+  if (wifiSessionMode_ == kWifiSessionWhole) {
+    return tr4(TrKey4::WifiSessionWhole);
+  }
+  const uint32_t autoOffMs = sessionWifiAutoOffMs();
+  if (autoOffMs > 0) {
+    return String(tr4(TrKey4::WifiSessionAuto)) + " " + String(autoOffMs / 1000) + " s " +
+           tr4(TrKey4::WifiSessionNotAdvised);
+  }
+  return tr4(TrKey4::WifiSessionStandard);
+}
+
+// Brings the app's network back up (Wi-Fi session setting). Skipped while
+// the radio belongs to something else: an update check, the sync screen,
+// USB transfer.
+void App::resumeSessionWifi(const char *reason) {
+  if (autoSyncActive_ || companionSync_.active() || state_ == AppState::CompanionSync ||
+      state_ == AppState::UsbTransfer || otaCheckInProgress_) {
+    return;
+  }
+  CompanionSyncManager::Config syncConfig;
+  syncConfig.wifiSsid = "";
+  syncConfig.wifiPassword = "";
+  if (companionSync_.begin(syncConfig)) {
+    autoSyncActive_ = true;
+    autoSyncStartedMs_ = millis();
+    autoSyncClientConnected_ = false;
+    Serial.printf("[app] wifi session: network on (%s)\n", reason);
+  } else {
+    Serial.printf("[app] wifi session: network failed to start (%s)\n", reason);
   }
 }
 
@@ -7138,6 +7295,9 @@ void App::finishWelcomeWizard(uint32_t nowMs) {
 // pierwszego uruchomienia musi się dać tylko przejść do końca, nie ominąć.
 void App::wizardStepBack(uint32_t nowMs) {
   switch (menuScreen_) {
+    case MenuScreen::SdCardSetup:
+      sdCardSetupBack(nowMs);
+      return;
     case MenuScreen::WelcomeSdCard:
       if (welcomeSdState_ != WelcomeSdState::Formatting) {
         openWelcomeLanguage();
@@ -7500,8 +7660,10 @@ void App::maybeAutoDownloadFonts(uint32_t nowMs) {
   if (fontPackComplete_ || fontDownloadInProgress_) {
     return;
   }
-  // The wizard's loading step orders its own downloads (books, then fonts).
-  if (menuScreen_ == MenuScreen::WelcomeLoading) {
+  // The wizard's loading step orders its own downloads (books, then fonts);
+  // the card screen asks first (AppSdSetup.inl).
+  if (menuScreen_ == MenuScreen::WelcomeLoading || menuScreen_ == MenuScreen::SdCardSetup ||
+      cardReaderMode_) {
     return;
   }
   if (lastFontDownloadAttemptMs_ != 0 &&
@@ -7605,6 +7767,14 @@ void App::fontDownloadTask(void *params) {
         if (!mediumOk) {
           Serial.printf("[fonts] %s_70.fnt failed: %s\n", base.c_str(), errorDetail.c_str());
           continue;
+        }
+
+        // Files from before the "-v2" pack (smaller letters): no longer read.
+        const int versionMark = base.lastIndexOf("-v");
+        if (versionMark > 0) {
+          const String legacy = "/fonts/" + base.substring(0, versionMark);
+          SD_MMC.remove(legacy + ".fnt");
+          SD_MMC.remove(legacy + "_70.fnt");
         }
 
         queuedResult.downloaded++;
@@ -9931,7 +10101,10 @@ void App::updateCompanionSync(uint32_t nowMs) {
   constexpr uint32_t kCompanionSyncTouchGraceMs = 700;
   TouchEvent ev;
   if (touch_.poll(ev)) {
-    if (ev.phase == TouchPhase::Start) {
+    lastActivityMs_ = nowMs;
+    if (wakeCardReaderScreen(ev)) {
+      companionSyncTouchStarted_ = false;
+    } else if (ev.phase == TouchPhase::Start) {
       companionSyncTouchStarted_ = nowMs - companionSyncEnteredMs_ >= kCompanionSyncTouchGraceMs;
       companionSyncTouchStartX_ = ev.x;
     } else if (ev.phase == TouchPhase::End && companionSyncTouchStarted_) {
@@ -10023,8 +10196,16 @@ void App::renderCompanionSyncScreen() {
 
 void App::exitCompanionSync(uint32_t nowMs) {
   Serial.println("[app] leaving companion sync mode");
-  display_.renderStatus("Sync", tr(TrKey::Stopping), "");
-  companionSync_.end();
+  // Wi-Fi kept for the whole session: leaving this screen hands the running
+  // network back to the background path in update() instead of closing it.
+  if (wifiSessionMode_ == kWifiSessionWhole) {
+    autoSyncActive_ = true;
+    autoSyncStartedMs_ = nowMs;
+    autoSyncClientConnected_ = false;
+  } else {
+    display_.renderStatus("Sync", tr(TrKey::Stopping), "");
+    companionSync_.end();
+  }
   preferences_.end();
   preferences_.begin(kPrefsNamespace, false);
   reloadRuntimePreferences(nowMs, false);
@@ -10034,6 +10215,10 @@ void App::exitCompanionSync(uint32_t nowMs) {
   companionSync_.consumeLibraryChanged();
   companionChangesPending_ = false;
   syncBluetoothWithSetting();
+  if (cardReaderMode_) {
+    returnToCardReader(nowMs);
+    return;
+  }
   refreshLibraryFromCompanion(nowMs);
   menuScreen_ = MenuScreen::Main;
   setState(AppState::Paused, nowMs);
@@ -10235,9 +10420,14 @@ void App::updateUsbTransfer(uint32_t nowMs) {
     return;
   }
 
-  // Touch anywhere = exit USB transfer (back button)
+  // Touch anywhere = exit USB transfer (back button). In card-reader mode
+  // the first touch on the dimmed screen only wakes it.
   TouchEvent ev;
-  if (touch_.poll(ev) && ev.phase == TouchPhase::End) {
+  const bool touched = touch_.poll(ev);
+  if (touched) {
+    lastActivityMs_ = nowMs;
+  }
+  if (touched && !wakeCardReaderScreen(ev) && ev.phase == TouchPhase::End) {
     powerButtonLongPressHandled_ = true;
     exitUsbTransfer(nowMs);
     return;
@@ -10266,6 +10456,10 @@ void App::exitUsbTransfer(uint32_t nowMs) {
   usbTransfer_.end();
 
   storageReady_ = storage_.begin();
+  if (cardReaderMode_) {
+    returnToCardReader(nowMs);
+    return;
+  }
   if (storageReady_) {
     const int refreshedBookIndex = findBookIndexByPath(currentBookPath_);
     if (refreshedBookIndex >= 0) {
@@ -10798,6 +10992,9 @@ void App::renderScreensaverSettings() {
 String App::screensaverTimeoutLabel() const {
   if (screensaverTimeoutIndex_ >= kScreensaverTimeoutCount) return "5 min";
   const uint16_t minutes = kScreensaverTimeoutMinutes[screensaverTimeoutIndex_];
+  if (minutes == 0) {
+    return tr4(TrKey4::SaverOff);
+  }
   return String(minutes) + " min";
 }
 
@@ -12644,3 +12841,4 @@ void App::handleStorageStatus(void *context, const char *title, const char *line
 #include "AppSavers.inl"
 #include "AppTutorial.inl"
 #include "AppWizard.inl"
+#include "AppSdSetup.inl"

@@ -169,6 +169,9 @@ class App {
     WelcomeFont,
     WelcomeLibrary,
     WelcomeMenuFont,
+    // Card check at boot (after setup): unreadable card, or a new card
+    // without the reader's files, and the card-reader mode (sdSetupState_).
+    SdCardSetup,
     TutorialStep1,
     TutorialStep2,
     TutorialStep3,
@@ -398,6 +401,23 @@ class App {
   void maybeAutoCheckForUpdates(uint32_t nowMs);
   bool startBackgroundOtaCheck(const OtaUpdater::Config &config);
   void stopAutoSyncAccessPoint(const char *reason);
+  enum class SdSetupState : uint8_t;  // defined with the card-check state below
+  bool checkSdCardAtBoot(uint32_t nowMs);
+  void openSdCardSetup(SdSetupState state, uint32_t nowMs);
+  void fillSdCardSetupView(nano::WizardView &view);
+  void selectSdCardSetup(int hit, uint32_t nowMs);
+  void sdCardSetupBack(uint32_t nowMs);
+  void startSdSetupDownload(uint32_t nowMs);
+  void updateSdCardSetup(uint32_t nowMs);
+  void returnToCardReader(uint32_t nowMs);
+  void markCardKnown();
+  uint32_t readCardMarkId();
+  void updateCardReaderDim(uint32_t nowMs);
+  bool wakeCardReaderScreen(const TouchEvent &event);
+  bool sessionWifiHold() const;
+  uint32_t sessionWifiAutoOffMs() const;
+  String wifiSessionLabel() const;
+  void resumeSessionWifi(const char *reason);
   static void otaCheckTask(void *params);
   void pollOtaCheckResult(uint32_t nowMs);
   // Font pack (Etap 4/5+ planu fontów na SD): no user action required — the
@@ -545,7 +565,7 @@ class App {
   bool wizardNanoScreen() const;
   size_t wizardStepIndex() const;
   void renderWizardPage();
-  void handleWizardTouchAt(uint16_t x, uint16_t y, uint32_t nowMs);
+  void handleWizardTouchAt(uint16_t x, uint16_t y, uint32_t touchStartMs, uint32_t nowMs);
   // Menu palette, menu font, reading typeface and first book as wizard
   // pages.
   void openWelcomeMenuTheme(uint32_t nowMs);
@@ -1210,6 +1230,10 @@ class App {
   // Set once the wizard's pairing step starts the phone network: from there
   // the network (and Bluetooth) stay up, no 30 s timeout, until power-off.
   bool firstSessionSyncHold_ = false;
+  // Wi-Fi session setting (kPrefWifiSession) and when the current reading
+  // run started, for the automatic mode's switch-off.
+  uint8_t wifiSessionMode_ = 0;
+  uint32_t playingSinceMs_ = 0;
   // Changes from the app over the auto-sync network, waiting for the book
   // to stop playing (applyCompanionChanges).
   bool companionSettingsPending_ = false;
@@ -1221,6 +1245,31 @@ class App {
   uint32_t welcomeScreenEnteredMs_ = 0;
   enum class WelcomeSdState : uint8_t { Missing, Unreadable, ConfirmFormat, Formatting, Failed };
   WelcomeSdState welcomeSdState_ = WelcomeSdState::Missing;
+  // Card check at boot (AppSdSetup.inl).
+  enum class SdSetupState : uint8_t {
+    NeedsFormat,
+    ConfirmFormat,
+    Formatting,
+    FormatFailed,
+    NeedsAssets,
+    NoWifi,
+    Downloading,
+    DownloadFailed,
+    Done,
+    CardReader,
+  };
+  SdSetupState sdSetupState_ = SdSetupState::NeedsAssets;
+  bool sdSetupChecked_ = false;
+  bool sdSetupFormatFromReader_ = false;
+  bool sdSetupBooksStarted_ = false;
+  uint32_t sdSetupStateMs_ = 0;
+  uint32_t sdSetupLastRenderMs_ = 0;
+  // Card-reader mode: the reader's other functions stay closed until the
+  // files are downloaded, the card is formatted or swapped. The screen dims
+  // after 30 s without a touch whatever the brightness setting.
+  bool cardReaderMode_ = false;
+  bool cardReaderDimmed_ = false;
+  bool cardReaderSwallowTouch_ = false;
   uint32_t welcomeLoadingLastRenderMs_ = 0;
   // Update (check, maybe install + restart), then Assets (fonts, books).
   enum class WelcomeLoadPhase : uint8_t { Start, Update, Assets, Restarting };
@@ -1231,6 +1280,7 @@ class App {
   bool welcomeUpdateChecked_ = false;
   // Typeface and library pages: what the chips show, and the page.
   std::vector<DisplayManager::ReaderTypeface> welcomeFontFaces_;
+  std::vector<bool> welcomeFontReady_;  // parallel to welcomeFontFaces_: on the card
   uint8_t welcomeLibrarySelected_ = 0;
   // Library page: a picked title is downloading / failed to download.
   bool welcomeLibraryWaiting_ = false;
@@ -1248,6 +1298,12 @@ class App {
   // Set while prepareWizardResume() opens a step under the boot splash:
   // the page is drawn once the splash is gone (setState(Menu)).
   bool wizardRenderSuppressed_ = false;
+  // When the wizard page last changed (another step or SD state), and which
+  // page that was: a Dalej/Wstecz tap that began before the new page was up,
+  // or lands within kWizardTapGuardMs of it, is dropped (a bouncing release
+  // used to press the button at the same spot on the next page too).
+  uint32_t wizardPageShownMs_ = 0;
+  uint32_t wizardPageKey_ = 0xFFFFFFFFUL;
   uint8_t welcomeReadingModePreviewMode_ = 0;  // 0=RSVP, 1=Scroll
   // Podgląd RSVP/Scroll w kreatorze musi realnie animować słowa/przewijanie
   // — statyczny kadr niczego nie demonstruje. Wspólny licznik czasu i
@@ -1267,9 +1323,9 @@ class App {
   uint8_t scrollFontSize_ = 4;
   uint8_t scrollLineSpacing_ = 1;
   uint8_t scrollMargin_ = 1;
-  uint16_t pacingLongWordDelayMs_ = 100;
-  uint16_t pacingComplexWordDelayMs_ = 100;
-  uint16_t pacingPunctuationDelayMs_ = 100;
+  uint16_t pacingLongWordDelayMs_ = 50;
+  uint16_t pacingComplexWordDelayMs_ = 50;
+  uint16_t pacingPunctuationDelayMs_ = 50;
   PacingDelayTarget pacingDelayEditorTarget_ = PacingDelayTarget::LongWords;
   // True while the touch that is currently down started on the editor's
   // corner Back icon — set on TouchPhase::Start, consumed on End, so a

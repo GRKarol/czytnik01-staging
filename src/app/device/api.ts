@@ -108,6 +108,8 @@ export interface ReaderDeviceSettings {
   librarySort: number;
   autoUpdate: boolean;
   bluetooth: boolean;
+  /** App network after boot: 0 = 30 s, 1 = whole session, 2..4 = auto off after 10/20/30 s of reading. */
+  wifiSession: number;
   helpHints: boolean;
   savePointNames: boolean;
 }
@@ -192,6 +194,21 @@ export interface PluginInfo {
   active: boolean;
   builtin?: boolean;
   requiresOta?: boolean;
+  /** The reader's own description (firmware 0.4.04+). */
+  description?: string;
+  /** The plugin keeps files the app can list, fetch and delete (Dyktafon). */
+  files?: boolean;
+}
+
+/** One file a plugin keeps on the reader's card. */
+export interface PluginFile {
+  name: string;
+  size: number;
+}
+
+export interface PluginFiles {
+  mime: string;
+  files: PluginFile[];
 }
 
 export interface DeviceLogTail {
@@ -244,9 +261,9 @@ export const DEFAULT_SETTINGS: DeviceSettings = {
   readerMode: "rsvp",
   pauseBehaviour: "tap",
   baseWpm: 300,
-  longWordDelayMs: 150,
-  complexWordDelayMs: 100,
-  punctuationDelayMs: 200,
+  longWordDelayMs: 50,
+  complexWordDelayMs: 50,
+  punctuationDelayMs: 50,
   showBatteryWhileReading: true,
   showChapterWhileReading: true,
   showPercentWhileReading: true,
@@ -283,12 +300,13 @@ export const DEFAULT_SETTINGS: DeviceSettings = {
     librarySort: 0,
     autoUpdate: true,
     bluetooth: false,
+    wifiSession: 0,
     helpHints: true,
     savePointNames: true,
   },
   options: {
     screensaverModes: [7, 8, 0, 2, 3, 9, 6],
-    screensaverTimeoutMin: [1, 2, 3, 5, 10, 15, 20, 30],
+    screensaverTimeoutMin: [1, 2, 3, 5, 10, 15, 20, 30, 0],
     screensaverAutoOffMin: [0, 5, 10, 15, 20, 30, 45, 60],
     sleepGuardMin: [0, 5, 10, 15, 20, 30, 45, 60],
     focusColors: [0xf800, 0x001f, 0x07e0, 0xffe0, 0xfd20, 0xa01f],
@@ -336,6 +354,13 @@ export interface DeviceApi {
   setRssFeeds(feeds: string[]): Promise<string[]>;
 
   getPlugins(): Promise<PluginInfo[]>;
+  /** Switches a plugin on or off; answers with the whole list. */
+  setPluginActive(id: string, active: boolean): Promise<PluginInfo[]>;
+  /** New order of every plugin id; answers with the whole list. */
+  setPluginOrder(ids: string[]): Promise<PluginInfo[]>;
+  listPluginFiles(id: string): Promise<PluginFiles>;
+  getPluginFile(id: string, name: string): Promise<Blob>;
+  deletePluginFile(id: string, name: string): Promise<void>;
 
   /**
    * 0 = nigdy nie wyłączaj WiFi/AP automatycznie. Wywołane bez argumentu
@@ -386,7 +411,7 @@ interface MockExtras {
 const EMPTY_WIFI: WifiStationConfig = { configured: false, ssid: "", passwordSet: false };
 
 const MOCK_PLUGINS: PluginInfo[] = [
-  { id: "dictaphone", name: "Dyktafon", installed: true, active: false, builtin: true },
+  { id: "dictaphone", name: "Dyktafon", installed: true, active: false, builtin: true, files: true },
   { id: "focus-timer", name: "Klepsydra", installed: true, active: true, builtin: true },
   { id: "rss", name: "RSS", installed: true, active: true, builtin: true },
   { id: "night-reading", name: "Tryb nocnego czytania", installed: true, active: false, builtin: true },
@@ -564,7 +589,38 @@ export class MockDeviceApi implements DeviceApi {
   }
 
   async getPlugins(): Promise<PluginInfo[]> {
-    return this.delay(MOCK_PLUGINS, 150);
+    return this.delay(this.mockPlugins, 150);
+  }
+
+  private mockPlugins: PluginInfo[] = MOCK_PLUGINS.map((p) => ({ ...p }));
+  private mockRecordings: PluginFile[] = [
+    { name: "REC_0001.wav", size: 182_044 },
+    { name: "REC_0002.wav", size: 64_044 },
+  ];
+
+  async setPluginActive(id: string, active: boolean): Promise<PluginInfo[]> {
+    this.mockPlugins = this.mockPlugins.map((p) => (p.id === id ? { ...p, active } : p));
+    return this.delay(this.mockPlugins, 120);
+  }
+
+  async setPluginOrder(ids: string[]): Promise<PluginInfo[]> {
+    const byId = new Map(this.mockPlugins.map((p) => [p.id, p]));
+    const ordered = ids.map((id) => byId.get(id)).filter((p): p is PluginInfo => !!p);
+    this.mockPlugins = [...ordered, ...this.mockPlugins.filter((p) => !ids.includes(p.id))];
+    return this.delay(this.mockPlugins, 120);
+  }
+
+  async listPluginFiles(): Promise<PluginFiles> {
+    return this.delay({ mime: "audio/wav", files: this.mockRecordings }, 150);
+  }
+
+  async getPluginFile(): Promise<Blob> {
+    throw new Error(tr("plugins.files.needWifi"));
+  }
+
+  async deletePluginFile(_id: string, name: string): Promise<void> {
+    this.mockRecordings = this.mockRecordings.filter((f) => f.name !== name);
+    await this.delay(undefined, 120);
   }
 
   async setWifiTimeoutSeconds(seconds?: number): Promise<number> {
@@ -749,6 +805,11 @@ export const deviceApi = {
   getRssFeeds: () => _api.getRssFeeds(),
   setRssFeeds: (feeds: string[]) => _api.setRssFeeds(feeds),
   getPlugins: () => _api.getPlugins(),
+  setPluginActive: (id: string, active: boolean) => _api.setPluginActive(id, active),
+  setPluginOrder: (ids: string[]) => _api.setPluginOrder(ids),
+  listPluginFiles: (id: string) => _api.listPluginFiles(id),
+  getPluginFile: (id: string, name: string) => _api.getPluginFile(id, name),
+  deletePluginFile: (id: string, name: string) => _api.deletePluginFile(id, name),
   setWifiTimeoutSeconds: (seconds?: number) => _api.setWifiTimeoutSeconds(seconds),
   getCapabilities: () => _api.getCapabilities(),
   getDeviceInfo: () => _api.getDeviceInfo(),

@@ -1,6 +1,7 @@
 #include "update/OtaUpdater.h"
 
 #include <algorithm>
+#include <atomic>
 #include <memory>
 #include <new>
 
@@ -480,6 +481,93 @@ bool OtaUpdater::connectWiFi(const Config &config, StatusCallback callback,
     xSemaphoreGive(wifiSessionMutex());
   }
   return connected;
+}
+
+namespace {
+// Station disconnects seen since the last reset, and the router's reason for
+// the latest one (wifi_err_reason_t). Written from the Wi-Fi event task.
+std::atomic<uint8_t> g_staDisconnectCount{0};
+std::atomic<uint8_t> g_staDisconnectReason{0};
+// A user attempt stops waiting this long after WiFi.begin() at the latest.
+constexpr uint32_t kUserAttemptTimeoutMs = 12000;
+
+void watchStaDisconnects() {
+  static bool registered = false;
+  if (registered) {
+    return;
+  }
+  registered = true;
+  WiFi.onEvent(
+      [](arduino_event_id_t, arduino_event_info_t info) {
+        const uint8_t reason = info.wifi_sta_disconnected.reason;
+        if (reason == WIFI_REASON_ASSOC_LEAVE) {
+          return;  // our own disconnect before begin()
+        }
+        g_staDisconnectReason = reason;
+        g_staDisconnectCount.fetch_add(1);
+      },
+      ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+}
+
+OtaUpdater::WifiFailure failureForReason(uint8_t reason) {
+  switch (reason) {
+    case WIFI_REASON_NO_AP_FOUND:
+      return OtaUpdater::WifiFailure::NotFound;
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_AUTH_EXPIRE:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_MIC_FAILURE:
+    case WIFI_REASON_802_1X_AUTH_FAILED:
+      return OtaUpdater::WifiFailure::WrongPassword;
+    default:
+      return OtaUpdater::WifiFailure::NoAnswer;
+  }
+}
+}  // namespace
+
+bool OtaUpdater::connectWiFiUserAttempt(const Config &config, WifiFailure &failure, StatusCallback callback,
+                                        void *context) const {
+  failure = WifiFailure::None;
+  xSemaphoreTake(wifiSessionMutex(), portMAX_DELAY);
+  if ((WiFi.getMode() & WIFI_MODE_AP) != 0) {
+    xSemaphoreGive(wifiSessionMutex());
+    failure = WifiFailure::Busy;
+    Serial.println("[wifi] sync access point is up - connect attempt refused");
+    return false;
+  }
+  watchStaDisconnects();
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.setHostname(kFlowerHostname);
+  g_staDisconnectCount = 0;
+  g_staDisconnectReason = 0;
+  WiFi.begin(config.wifiSsid.c_str(), config.wifiPassword.c_str());
+
+  // The driver retries once by itself after the first failure; the second
+  // "no" from the router is the answer.
+  const uint32_t startMs = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startMs < kUserAttemptTimeoutMs &&
+         g_staDisconnectCount.load() < 2) {
+    const uint32_t elapsedMs = millis() - startMs;
+    reportStatus(callback, context, kStatusTitle, "Connecting Wi-Fi", config.wifiSsid,
+                 5 + static_cast<int>((elapsedMs * 15) / kUserAttemptTimeoutMs));
+    delay(100);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    return true;
+  }
+  const uint8_t reason = g_staDisconnectReason.load();
+  failure = g_staDisconnectCount.load() > 0 ? failureForReason(reason) : WifiFailure::NoAnswer;
+  Serial.printf("[wifi] connect to %s failed after %lu ms, reason %u (%u disconnects)\n", config.wifiSsid.c_str(),
+                static_cast<unsigned long>(millis() - startMs), static_cast<unsigned>(reason),
+                static_cast<unsigned>(g_staDisconnectCount.load()));
+  WiFi.disconnect(false, false);
+  delay(100);
+  WiFi.mode(WIFI_OFF);
+  xSemaphoreGive(wifiSessionMutex());
+  return false;
 }
 
 void OtaUpdater::disconnectWiFi() const {
@@ -1021,6 +1109,7 @@ bool OtaUpdater::downloadAsset(const Config &config, const String &assetName,
   size_t totalWritten = 0;
   uint32_t lastDataMs = millis();
   bool stalled = false;
+  bool writeFailed = false;
   while (dlHttp.connected() || stream->available()) {
     if (reportedSize > 0 && totalWritten >= static_cast<size_t>(reportedSize)) {
       break;
@@ -1042,8 +1131,14 @@ bool OtaUpdater::downloadAsset(const Config &config, const String &assetName,
       break;
     }
 
-    out.write(buffer, static_cast<size_t>(bytesRead));
-    totalWritten += static_cast<size_t>(bytesRead);
+    const size_t written = out.write(buffer, static_cast<size_t>(bytesRead));
+    if (written != static_cast<size_t>(bytesRead)) {
+      // The card took less than it was given: the file on it would be
+      // shorter than the download and fail to load later.
+      writeFailed = true;
+      break;
+    }
+    totalWritten += written;
     lastDataMs = millis();
 
     if (reportedSize > 0 && callback != nullptr) {
@@ -1056,9 +1151,22 @@ bool OtaUpdater::downloadAsset(const Config &config, const String &assetName,
   dlHttp.end();
 
   const bool sizeMatches = reportedSize <= 0 || totalWritten == static_cast<size_t>(reportedSize);
-  if (stalled || !sizeMatches || totalWritten == 0) {
+  if (stalled || writeFailed || !sizeMatches || totalWritten == 0) {
     SD_MMC.remove(tmpPath);
-    errorDetail = stalled ? "Download stalled" : "Incomplete download";
+    errorDetail = stalled ? "Download stalled" : (writeFailed ? "SD write failed" : "Incomplete download");
+    return false;
+  }
+  // Read back what the card holds: a write the FAT layer accepted but did
+  // not keep shows up here as a shorter file.
+  File check = SD_MMC.open(tmpPath);
+  const size_t onCard = check ? check.size() : 0;
+  if (check) {
+    check.close();
+  }
+  if (onCard != totalWritten) {
+    SD_MMC.remove(tmpPath);
+    errorDetail = "SD size mismatch (" + String(static_cast<unsigned>(onCard)) + "/" +
+                  String(static_cast<unsigned>(totalWritten)) + ")";
     return false;
   }
 

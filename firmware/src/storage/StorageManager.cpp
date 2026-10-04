@@ -2136,6 +2136,24 @@ String StorageManager::bookDisplayName(size_t index) const {
   if (index < bookTitles_.size() && !bookTitles_[index].isEmpty()) {
     return bookTitles_[index];
   }
+  if (index < bookTitles_.size() && hasRsvpExtension(path)) {
+    // The library scan can miss a title when the card is busy (starter books
+    // still downloading): one more read, then the file name for good.
+    if (bookTitleRetried_.size() != bookTitles_.size()) {
+      bookTitleRetried_.assign(bookTitles_.size(), false);
+    }
+    if (!bookTitleRetried_[index]) {
+      bookTitleRetried_[index] = true;
+      const RsvpDirectiveValues values = readRsvpDirectiveValues(path);
+      if (index < bookAuthors_.size() && bookAuthors_[index].isEmpty()) {
+        bookAuthors_[index] = values.author;
+      }
+      if (!values.title.isEmpty()) {
+        bookTitles_[index] = values.title;
+        return values.title;
+      }
+    }
+  }
 
   return normalizeDisplayText(displayNameWithoutExtension(path));
 }
@@ -3219,6 +3237,7 @@ void StorageManager::refreshBookPaths(bool includeMetadata) {
 
 void StorageManager::rebuildBookMetadataCache() {
   bookTitles_.clear();
+  bookTitleRetried_.clear();
   bookAuthors_.clear();
   bookTitles_.reserve(bookPaths_.size());
   bookAuthors_.reserve(bookPaths_.size());

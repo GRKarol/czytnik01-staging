@@ -303,6 +303,9 @@ class DisplayManager {
   // clears itself on read so callers show the warning exactly once, right
   // after the user action that triggered the load attempt.
   bool consumeFontLoadFailure();
+  // True when the last failed load deleted a damaged .fnt (re-downloaded
+  // by the font pack retry), false when the file was simply missing.
+  static bool lastFontLoadDamaged();
   // Non-destructive peek (unlike consumeFontLoadFailure): true once the
   // currently-configured typeface's glyph data is actually usable — always
   // true for the 3 built-in faces, true for an SD-backed face only once its
@@ -549,8 +552,10 @@ class DisplayManager {
                       const String &detail, bool selected, bool pressed = false);
   // Reading theme preview (0 dark, 1 light, 2 night): a word in that
   // theme's colors with the focus letter, as the reading screen shows it.
-  void nanoReadingThemeChip(const ui::Rect &rect, uint8_t theme, const String &name, bool selected,
-                            bool pressed = false);
+  // sampleHead/Focus/Tail: the word drawn on the chip, split around its
+  // focus letter (in the UI language).
+  void nanoReadingThemeChip(const ui::Rect &rect, uint8_t theme, const String &name, const String &sampleHead,
+                            const String &sampleFocus, const String &sampleTail, bool selected, bool pressed);
   // Low version of the chip for one row of controls: the theme's
   // background with its name in the theme's word color.
   void nanoReadingThemePill(const ui::Rect &rect, uint8_t theme, const String &name, bool selected,

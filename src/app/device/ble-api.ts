@@ -21,8 +21,10 @@ import type {
   BookTextPage,
   DeviceCapabilities,
   DeviceInfo,
+  PluginFiles,
 } from "./api";
 import { DEFAULT_SETTINGS } from "./api";
+import { fromFirmware, toFirmware } from "./http-api";
 import { BluetoothLink } from "./bluetooth-link";
 import { tr } from "../i18n/index";
 
@@ -125,20 +127,28 @@ export class BleDeviceApi implements DeviceApi {
     throw new Error(tr("err.bleUnsupported"));
   }
 
+  // Same JSON as GET/PUT /api/settings over Wi-Fi, so the same adapter. The
+  // app's own field names meant nothing to the reader: settings sent over
+  // Bluetooth were dropped and the screen showed the defaults.
   async getSettings(): Promise<DeviceSettings> {
     await this.authenticate();
     const ev = await this.sendCmd({ cmd: "get-settings" });
     if (ev.ev === "settings" && ev.data) {
-      // For now return defaults — full mapping can be added later
-      return DEFAULT_SETTINGS;
+      return fromFirmware(ev.data as Parameters<typeof fromFirmware>[0]);
     }
     return DEFAULT_SETTINGS;
   }
 
   async putSettings(patch: Partial<DeviceSettings>): Promise<DeviceSettings> {
     await this.authenticate();
-    await this.sendCmd({ cmd: "set-settings", settings: patch });
-    return { ...DEFAULT_SETTINGS, ...patch };
+    const ev = await this.sendCmd({ cmd: "set-settings", settings: toFirmware(patch) });
+    if (ev.ev === "error") {
+      throw new Error(String(ev.reason ?? "settings rejected"));
+    }
+    if (ev.data) {
+      return fromFirmware(ev.data as Parameters<typeof fromFirmware>[0]);
+    }
+    return this.getSettings();
   }
 
   async installOta(): Promise<void> {
@@ -166,6 +176,26 @@ export class BleDeviceApi implements DeviceApi {
   }
 
   async getPlugins(): Promise<PluginInfo[]> {
+    throw new Error(bleUnsupported());
+  }
+
+  async setPluginActive(): Promise<PluginInfo[]> {
+    throw new Error(bleUnsupported());
+  }
+
+  async setPluginOrder(): Promise<PluginInfo[]> {
+    throw new Error(bleUnsupported());
+  }
+
+  async listPluginFiles(): Promise<PluginFiles> {
+    throw new Error(bleUnsupported());
+  }
+
+  async getPluginFile(): Promise<Blob> {
+    throw new Error(bleUnsupported());
+  }
+
+  async deletePluginFile(): Promise<void> {
     throw new Error(bleUnsupported());
   }
 

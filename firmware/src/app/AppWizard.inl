@@ -41,6 +41,8 @@ constexpr uint32_t kWizardRestartDelayMs = 2000;
 // A check that hangs (GitHub unreachable, no DNS) stops holding the
 // loading screen after this long; a running download is left alone.
 constexpr uint32_t kWizardUpdateCheckMaxMs = 90000;
+// A Dalej/Wstecz/extra tap this soon after the page changed is ignored.
+constexpr uint32_t kWizardTapGuardMs = 450;
 
 // Firmware update run from the loading step: written by wizardUpdateTask,
 // read by the main loop.
@@ -90,6 +92,7 @@ bool App::wizardNanoScreen() const {
     case MenuScreen::WelcomeAppPairing:
     case MenuScreen::WelcomeConfigureInApp:
     case MenuScreen::WelcomeLibrary:
+    case MenuScreen::SdCardSetup:
       return true;
     default:
       return false;
@@ -179,6 +182,7 @@ void App::renderWizardPage() {
       addChips(nano::WizardChipArt::Theme);
       for (size_t i = 0; i < view.chips.size() && i < 3; ++i) {
         view.chips[i].theme = kWizardThemeChip[i];
+        view.chips[i].word = tr4(TrKey4::TutWord);
       }
       break;
     case MenuScreen::WelcomeHighlightColor:
@@ -278,7 +282,8 @@ void App::renderWizardPage() {
         chip.art = nano::WizardChipArt::Typeface;
         chip.typeface = welcomeFontFaces_[i];
         chip.label = typefaceDisplayName(chip.typeface);
-        chip.selected = chip.typeface == typographyConfig_.typeface;
+        chip.disabled = !welcomeFontReady_[i];
+        chip.selected = !chip.disabled && chip.typeface == typographyConfig_.typeface;
         view.chips.push_back(chip);
       }
       break;
@@ -435,6 +440,9 @@ void App::renderWizardPage() {
       }
       break;
     }
+    case MenuScreen::SdCardSetup:
+      fillSdCardSetupView(view);
+      break;
     case MenuScreen::WelcomeAppPairing:
       view.body = nano::WizardBody::Qr;
       view.title = tr3(TrKey3::WelcomeAppPairingTitle);
@@ -461,6 +469,16 @@ void App::renderWizardPage() {
   if (classicColors) {
     display_.overrideNanoPalette(nanoPalette_, nanoOwnAccent_);
   }
+  const uint32_t pageKey = (static_cast<uint32_t>(menuScreen_) << 16) |
+                           (static_cast<uint32_t>(menuScreen_ == MenuScreen::SdCardSetup
+                                                      ? static_cast<uint8_t>(sdSetupState_)
+                                                      : static_cast<uint8_t>(welcomeSdState_))
+                            << 8) |
+                           (welcomeLibraryWaiting_ ? 1U : 0U);
+  if (pageKey != wizardPageKey_) {
+    wizardPageKey_ = pageKey;
+    wizardPageShownMs_ = millis();
+  }
 }
 
 void App::renderWizardBusy(const String &title, const String &subtitle) {
@@ -485,7 +503,7 @@ void App::renderWifiStatus(const String &line1, const String &line2) {
   display_.renderStatus("Wi-Fi", line1, line2);
 }
 
-void App::handleWizardTouchAt(uint16_t x, uint16_t y, uint32_t nowMs) {
+void App::handleWizardTouchAt(uint16_t x, uint16_t y, uint32_t touchStartMs, uint32_t nowMs) {
   int hit = nano::kNoTarget;
   for (const auto &target : wizardTargets_) {
     const ui::Rect &r = target.first;
@@ -495,6 +513,19 @@ void App::handleWizardTouchAt(uint16_t x, uint16_t y, uint32_t nowMs) {
     }
   }
   if (hit == nano::kNoTarget) {
+    return;
+  }
+  const bool stepButton = hit == kWizardNext || hit == kWizardBack || hit == kWizardExtra;
+  if (stepButton && (static_cast<int32_t>(touchStartMs - wizardPageShownMs_) < 0 ||
+                     nowMs - wizardPageShownMs_ < kWizardTapGuardMs)) {
+    // The finger was already down (or bounced) when this page came up: the
+    // tap was meant for the previous page's button at the same spot.
+    Serial.printf("[welcome] tap ignored, page up %lu ms\n",
+                  static_cast<unsigned long>(nowMs - wizardPageShownMs_));
+    return;
+  }
+  if (menuScreen_ == MenuScreen::SdCardSetup) {
+    selectSdCardSetup(hit, nowMs);
     return;
   }
   if (hit == kWizardPagePrev || hit == kWizardPageNext) {
@@ -524,7 +555,8 @@ void App::handleWizardTouchAt(uint16_t x, uint16_t y, uint32_t nowMs) {
         }
         break;
       case MenuScreen::WelcomeFont:
-        if (index < welcomeFontFaces_.size() && welcomeFontFaces_[index] != typographyConfig_.typeface) {
+        if (index < welcomeFontFaces_.size() && welcomeFontReady_[index] &&
+            welcomeFontFaces_[index] != typographyConfig_.typeface) {
           typographyConfig_.typeface = welcomeFontFaces_[index];
           preferences_.putUChar(kPrefReaderTypeface, static_cast<uint8_t>(typographyConfig_.typeface));
           applyTypographySettings(nowMs, false);
@@ -638,13 +670,16 @@ void App::openWelcomeMenuTheme(uint32_t nowMs) {
 }
 
 void App::rebuildWelcomeFontFaces() {
-  // Built-in faces always; the SD ones once both .fnt files are on the card.
+  // Every face keeps its place on the pages; the SD ones are tappable once
+  // both .fnt files are on the card. A list holding only the fonts already
+  // there grew in the middle as the pack arrived, and the page under the
+  // finger changed its fonts by itself.
   welcomeFontFaces_.clear();
+  welcomeFontReady_.clear();
   for (uint8_t i = 0; i < static_cast<uint8_t>(DisplayManager::ReaderTypeface::Count); ++i) {
     const auto typeface = static_cast<DisplayManager::ReaderTypeface>(i);
-    if (DisplayManager::isTypefaceAvailableOnSd(typeface)) {
-      welcomeFontFaces_.push_back(typeface);
-    }
+    welcomeFontFaces_.push_back(typeface);
+    welcomeFontReady_.push_back(DisplayManager::isTypefaceAvailableOnSd(typeface));
   }
 }
 

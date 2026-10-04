@@ -1352,7 +1352,11 @@ namespace {
 void paintWizardChip(DisplayManager &d, Sink &sink, const Rect &rect, const WizardChip &chip) {
   const bool pressed = sink.pressed(chip.id);
   if (chip.art == WizardChipArt::Theme) {
-    d.nanoReadingThemeChip(rect, chip.theme, chip.label, chip.selected, pressed);
+    String head;
+    String letter;
+    String tail;
+    splitSampleWord(chip.word.isEmpty() ? String("reading") : chip.word, head, letter, tail);
+    d.nanoReadingThemeChip(rect, chip.theme, chip.label, head, letter, tail, chip.selected, pressed);
     addTarget(sink, rect, chip.id);
     return;
   }
@@ -1367,6 +1371,12 @@ void paintWizardChip(DisplayManager &d, Sink &sink, const Rect &rect, const Wiza
     return;
   }
   if (chip.art == WizardChipArt::Typeface) {
+    if (chip.disabled) {
+      // Still on its way to the card: its place is kept so the pages do
+      // not shift as the pack arrives.
+      d.nanoButton(rect, chip.label, false, Icon::None, 1, "", "", false, false, chip.typeface);
+      return;
+    }
     d.nanoButton(rect, chip.label, true, Icon::None, 1, "", "", pressed || chip.selected, false, chip.typeface);
     if (chip.selected) {
       d.nanoDrawRoundRect(rect.x, rect.y, rect.w, rect.h, 10, d.nanoColor(Role::Accent));
@@ -1443,6 +1453,16 @@ void paintWizardChip(DisplayManager &d, Sink &sink, const Rect &rect, const Wiza
   addTarget(sink, rect, chip.id);
 }
 
+// The largest size, from maxSize down to 1, at which text fits width on one
+// line.
+uint8_t fittingTextSize(const String &text, int width, uint8_t maxSize) {
+  uint8_t size = maxSize;
+  while (size > 1 && DisplayManager::nanoTextWidth(text, size) > width) {
+    --size;
+  }
+  return size;
+}
+
 void paintWizardQr(DisplayManager &d, const Rect &box, const bool *qr, uint8_t size) {
   // White quiet zone behind dark modules, whatever the palette: phone
   // cameras want dark-on-light.
@@ -1488,7 +1508,9 @@ void paintWizard(DisplayManager &d, Sink &sink, const WizardView &view) {
   const bool qr = view.body == WizardBody::Qr;
   const int textW = qr ? 440 : kScreenW - 32;
   if (view.body != WizardBody::Message && view.body != WizardBody::Preview) {
-    d.nanoText(Rect(16, 14, textW, 32), view.title, 3, fg);
+    // A long title (English "Connect your reader to your phone" beside the
+    // QR) drops a size instead of losing its end to an ellipsis.
+    d.nanoText(Rect(16, 14, textW, 32), view.title, fittingTextSize(view.title, textW, 3), fg);
     if (view.body == WizardBody::Loading) {
       // Room for a two-line tip over the bar.
       d.nanoText(Rect(16, 46, textW, 38), view.subtitle, 1, muted, Align::Start, 2);
@@ -1548,7 +1570,8 @@ void paintWizard(DisplayManager &d, Sink &sink, const WizardView &view) {
       break;
     }
     case WizardBody::Message: {
-      d.nanoText(Rect(16, 30, kScreenW - 32, 44), view.title, 4, fg, Align::Center);
+      d.nanoText(Rect(16, 30, kScreenW - 32, 44), view.title, fittingTextSize(view.title, kScreenW - 32, 4), fg,
+                 Align::Center);
       if (view.autoPercent >= 0) {
         d.nanoText(Rect(16, 78, kScreenW - 32, 22), view.subtitle, 2, muted, Align::Center);
       } else {

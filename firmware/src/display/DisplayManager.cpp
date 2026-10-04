@@ -324,6 +324,8 @@ SdFontLoader gSdFontLoader;
 SdFontLoader gSdFontLoader70;
 DisplayManager::ReaderTypeface gSdFontLoadedTypeface = DisplayManager::ReaderTypeface::Count;
 bool gSdFontLoadFailurePending = false;
+// The last load found a .fnt with a bad header or length and deleted it.
+bool gSdFontDamaged = false;
 
 const EmbeddedFontVariant kAtkinsonFallbackVariant = {
     kEmbeddedAtkinsonBitmaps, reinterpret_cast<const EmbeddedFontGlyph *>(kEmbeddedAtkinsonGlyphs),
@@ -340,42 +342,46 @@ bool isExtraTypeface(DisplayManager::ReaderTypeface typeface) {
 
 // Lowercase file stem under /fonts/ for each extra typeface — must match
 // whatever name tools/generate_embedded_font.py --fnt-output was run with.
+// "-v2": the pack regenerated with letters as tall as Atkinson's (the old
+// files were calibrated on the full ink span and came out up to half the
+// size). New names make readers fetch the new files; fontDownloadTask()
+// deletes the old ones (legacySdFontBaseName).
 const char *sdFontBaseName(DisplayManager::ReaderTypeface typeface) {
   switch (typeface) {
     case DisplayManager::ReaderTypeface::Literata:
-      return "literata";
+      return "literata-v2";
     case DisplayManager::ReaderTypeface::Merriweather:
-      return "merriweather";
+      return "merriweather-v2";
     case DisplayManager::ReaderTypeface::Lora:
-      return "lora";
+      return "lora-v2";
     case DisplayManager::ReaderTypeface::Bitter:
-      return "bitter";
+      return "bitter-v2";
     case DisplayManager::ReaderTypeface::EBGaramond:
-      return "ebgaramond";
+      return "ebgaramond-v2";
     case DisplayManager::ReaderTypeface::Vollkorn:
-      return "vollkorn";
+      return "vollkorn-v2";
     case DisplayManager::ReaderTypeface::Gelasio:
-      return "gelasio";
+      return "gelasio-v2";
     case DisplayManager::ReaderTypeface::PtSerif:
-      return "ptserif";
+      return "ptserif-v2";
     case DisplayManager::ReaderTypeface::IbmPlexSerif:
-      return "ibmplexserif";
+      return "ibmplexserif-v2";
     case DisplayManager::ReaderTypeface::Cardo:
-      return "cardo";
+      return "cardo-v2";
     case DisplayManager::ReaderTypeface::ZillaSlab:
-      return "zillaslab";
+      return "zillaslab-v2";
     case DisplayManager::ReaderTypeface::OldStandard:
-      return "oldstandard";
+      return "oldstandard-v2";
     case DisplayManager::ReaderTypeface::Domine:
-      return "domine";
+      return "domine-v2";
     case DisplayManager::ReaderTypeface::Alegreya:
-      return "alegreya";
+      return "alegreya-v2";
     case DisplayManager::ReaderTypeface::Newsreader:
-      return "newsreader";
+      return "newsreader-v2";
     case DisplayManager::ReaderTypeface::NotoSerif:
-      return "notoserif";
+      return "notoserif-v2";
     case DisplayManager::ReaderTypeface::Spectral:
-      return "spectral";
+      return "spectral-v2";
     default:
       return "";
   }
@@ -493,9 +499,26 @@ void ensureExtraTypefaceLoaded(DisplayManager::ReaderTypeface typeface) {
   }
   gSdFontLoadedTypeface = typeface;
   const String base = sdFontBaseName(typeface);
-  const bool baseOk = gSdFontLoader.load("/fonts/" + base + ".fnt");
-  const bool mediumOk = gSdFontLoader70.load("/fonts/" + base + "_70.fnt");
+  const String basePath = "/fonts/" + base + ".fnt";
+  const String mediumPath = "/fonts/" + base + "_70.fnt";
+  const bool baseOk = gSdFontLoader.load(basePath);
+  const bool mediumOk = gSdFontLoader70.load(mediumPath);
   gSdFontLoadFailurePending = !baseOk || !mediumOk;
+  // A damaged file would sit on the card for good: it exists, so the font
+  // pack counts as complete and nothing fetches it again. Delete it; the
+  // background download then brings a fresh copy.
+  gSdFontDamaged = false;
+  if (!baseOk && gSdFontLoader.status() == SdFontLoader::Status::InvalidFormat) {
+    SD_MMC.remove(basePath);
+    gSdFontDamaged = true;
+  }
+  if (!mediumOk && gSdFontLoader70.status() == SdFontLoader::Status::InvalidFormat) {
+    SD_MMC.remove(mediumPath);
+    gSdFontDamaged = true;
+  }
+  if (gSdFontDamaged) {
+    Serial.printf("[sdfont] %s damaged, removed for a fresh download\n", base.c_str());
+  }
 }
 
 const EmbeddedFontVariant &extraFontVariant(DisplayManager::ReaderTypeface typeface) {
@@ -1375,6 +1398,8 @@ bool DisplayManager::consumeFontLoadFailure() {
   gSdFontLoadFailurePending = false;
   return true;
 }
+
+bool DisplayManager::lastFontLoadDamaged() { return gSdFontDamaged; }
 
 bool DisplayManager::isActiveTypefaceLoaded() const {
   const ReaderTypeface typeface = activeTypographyConfig().typeface;

@@ -462,8 +462,9 @@ struct BleApi::Impl : public NimBLEServerCallbacks, public NimBLECharacteristicC
     }
     String error;
     // Reuse existing settings apply logic from CompanionSyncManager
-    if (app->companionSync_.applySettingsJson(dataStr, error)) {
-      sendChunkedEvent("{\"ev\":\"settings-ok\"}");
+    if (app->companionSync_.applySettingsFromBle(dataStr, error)) {
+      // The current values back, as the HTTP PUT answers.
+      sendChunkedEvent("{\"ev\":\"settings-ok\",\"data\":" + buildSettingsJson() + "}");
     } else {
       sendChunkedEvent("{\"ev\":\"error\",\"reason\":\"" + error + "\"}");
     }
@@ -820,7 +821,7 @@ struct BleApi::Impl : public NimBLEServerCallbacks, public NimBLECharacteristicC
   String buildSettingsJson() {
     if (!app) return "{}";
     // Use CompanionSyncManager's existing settingsJson() method
-    return app->companionSync_.settingsJson();
+    return app->companionSync_.settingsJsonForBle();
   }
 
   // --- Token NVS ---

@@ -17,6 +17,7 @@
 #include "storage/StorageManager.h"
 #include "ble/BleApi.h"
 #include "plugins/BuiltinPlugins.h"
+#include "plugins/PluginLibrary.h"
 #include "update/OtaUpdater.h"
 #include <qrcode.h>
 
@@ -88,7 +89,7 @@ constexpr uint8_t kMaxBatteryLabel = 2;
 constexpr uint8_t kMaxReaderFontSize = 2;
 constexpr uint8_t kMaxReaderTypeface = 19;  // DisplayManager::ReaderTypeface::Count - 1
 constexpr uint8_t kMaxPauseMode = 1;
-constexpr uint16_t kDefaultPacingDelayMs = 100;
+constexpr uint16_t kDefaultPacingDelayMs = 50;
 constexpr uint16_t kMaxPacingDelayMs = 600;
 constexpr int8_t kMinTypographyTracking = -2;
 constexpr int8_t kMaxTypographyTracking = 3;
@@ -773,6 +774,18 @@ void CompanionSyncManager::handlePluginsDeleteStatic() {
   }
 }
 
+void CompanionSyncManager::handlePluginFilesStatic() {
+  if (instance_ != nullptr) {
+    instance_->handlePluginFiles();
+  }
+}
+
+void CompanionSyncManager::handlePluginFileStatic() {
+  if (instance_ != nullptr) {
+    instance_->handlePluginFile();
+  }
+}
+
 void CompanionSyncManager::handlePowerWifiTimeoutStatic() {
   if (instance_ != nullptr) {
     instance_->handlePowerWifiTimeout();
@@ -960,6 +973,10 @@ bool CompanionSyncManager::startServer() {
   server_.on("/api/rss-feeds", HTTP_PUT, handleRssFeedsStatic);
   server_.on("/api/plugins", HTTP_GET, handlePluginsStatic);
   server_.on("/api/plugins", HTTP_DELETE, handlePluginsDeleteStatic);
+  server_.on("/api/plugins", HTTP_PUT, handlePluginsStatic);
+  server_.on("/api/plugins/files", HTTP_GET, handlePluginFilesStatic);
+  server_.on("/api/plugins/file", HTTP_GET, handlePluginFileStatic);
+  server_.on("/api/plugins/file", HTTP_DELETE, handlePluginFileStatic);
   server_.on("/api/power/wifi-timeout", HTTP_POST, handlePowerWifiTimeoutStatic);
   server_.on("/api/state", HTTP_GET, handleStateStatic);
   server_.on("/api/log/tail", HTTP_GET, handleLogTailStatic);
@@ -983,6 +1000,8 @@ bool CompanionSyncManager::startServer() {
   server_.on("/api/wifi", HTTP_OPTIONS, handleOptionsStatic);
   server_.on("/api/rss-feeds", HTTP_OPTIONS, handleOptionsStatic);
   server_.on("/api/plugins", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/plugins/files", HTTP_OPTIONS, handleOptionsStatic);
+  server_.on("/api/plugins/file", HTTP_OPTIONS, handleOptionsStatic);
   server_.on("/api/power/wifi-timeout", HTTP_OPTIONS, handleOptionsStatic);
   server_.on("/api/state", HTTP_OPTIONS, handleOptionsStatic);
   server_.on("/api/log/tail", HTTP_OPTIONS, handleOptionsStatic);
@@ -1839,6 +1858,7 @@ void CompanionSyncManager::handleCapabilities() {
   // Timer is now a dynamic plugin — always report as available capability
   body += "true";
   body += ",\"wifiTimeout\":true";
+  body += ",\"pluginManage\":true";
   body += "}}";
   server_.send(200, "application/json", body);
 }
@@ -1847,44 +1867,173 @@ void CompanionSyncManager::handleCapabilities() {
 
 namespace {
 
-// Mirrors PluginLibrary's own NVS layout (namespace "plugins", key
-// "enabled", comma-separated ids) — read directly here instead of sharing an
-// App-owned PluginLibrary instance, same decoupled pattern already used for
-// settings/RSS in this file.
-bool isPluginEnabledInNvs(const char *id) {
-  Preferences prefs;
-  prefs.begin("plugins", true);
-  const String csv = prefs.getString("enabled", "");
-  prefs.end();
-  if (csv.isEmpty()) return false;
-  const String needle = String(",") + id + ",";
-  const String haystack = String(",") + csv + ",";
-  return haystack.indexOf(needle) >= 0;
+// A plugin's file named by the app: a bare name with the plugin's own
+// extension, nothing that could leave its folder.
+bool pluginFileNameOk(const String &name, const BuiltinPluginFiles &files) {
+  if (name.isEmpty() || name.length() > 64 || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0 ||
+      name.indexOf("..") >= 0) {
+    return false;
+  }
+  String lowered = name;
+  lowered.toLowerCase();
+  return lowered.endsWith(files.ext);
+}
+
+String pluginFilesDir(const BuiltinPlugin &plugin) {
+  return String("/plugins/") + plugin.id + "/" + plugin.files->dir;
 }
 
 }  // namespace
 
+// GET: every built-in plugin in the user's order, with its state, and the
+// reader's advanced mode (the app shows Plugins only there).
+// PUT {"id","active"} switches one; PUT {"order":"a,b,c"} reorders. Both
+// answer with the new list. The App's own PluginLibrary sees the change on
+// its next loop (PluginLibrary::refreshIfStale()).
 void CompanionSyncManager::handlePlugins() {
   sendCorsHeaders();
-  String body;
-  body.reserve(768);
-  body += "{\"ok\":true,\"plugins\":[";
+  PluginLibrary library;
+  library.begin();
 
-  const BuiltinPlugin *plugins = BuiltinPlugins::all();
-  const size_t count = BuiltinPlugins::count();
-  for (size_t i = 0; i < count; ++i) {
-    if (i > 0) body += ",";
-    body += "{\"id\":\"";
-    body += plugins[i].id;
-    body += "\",\"name\":\"";
-    body += plugins[i].name;
-    body += "\",\"installed\":true,\"builtin\":true,\"active\":";
-    body += isPluginEnabledInNvs(plugins[i].id) ? "true" : "false";
-    body += "}";
+  if (server_.method() == HTTP_PUT) {
+    const String request = server_.arg("plain");
+    String order;
+    if (readJsonString(request, "order", order)) {
+      library.setOrder(order);
+    }
+    String id;
+    bool active = false;
+    if (readJsonString(request, "id", id) && readJsonBool(request, "active", active)) {
+      if (BuiltinPlugins::find(id.c_str()) == nullptr) {
+        server_.send(404, "application/json", "{\"ok\":false,\"error\":\"Unknown plugin\"}");
+        return;
+      }
+      library.setEnabled(id.c_str(), active);
+      logLine(String("Plugin ") + id + (active ? " on" : " off"));
+    }
   }
 
+  String body;
+  body.reserve(1536);
+  body += "{\"ok\":true,\"advanced\":";
+  body += preferences_.getBool("dev_mode", false) ? "true" : "false";
+  body += ",\"plugins\":[";
+  bool first = true;
+  for (const auto &entry : library.all()) {
+    const BuiltinPlugin *plugin = BuiltinPlugins::find(entry.id.c_str());
+    if (!first) body += ",";
+    first = false;
+    body += "{\"id\":\"" + jsonEscape(entry.id) + "\"";
+    body += ",\"name\":\"" + jsonEscape(entry.name) + "\"";
+    body += ",\"description\":\"" + jsonEscape(entry.description) + "\"";
+    body += ",\"installed\":true,\"builtin\":true,\"active\":";
+    body += entry.enabled ? "true" : "false";
+    body += ",\"files\":";
+    body += (plugin != nullptr && plugin->files != nullptr) ? "true" : "false";
+    body += "}";
+  }
   body += "]}";
   server_.send(200, "application/json", body);
+}
+
+// GET /api/plugins/files?id= — the plugin's files on the card, newest name
+// last (the dictaphone numbers its takes).
+void CompanionSyncManager::handlePluginFiles() {
+  sendCorsHeaders();
+  const BuiltinPlugin *plugin = BuiltinPlugins::find(server_.arg("id").c_str());
+  if (plugin == nullptr || plugin->files == nullptr) {
+    server_.send(404, "application/json", "{\"ok\":false,\"error\":\"No files for this plugin\"}");
+    return;
+  }
+  std::vector<std::pair<String, uint32_t>> files;
+  File dir = SD_MMC.open(pluginFilesDir(*plugin));
+  if (dir && dir.isDirectory()) {
+    File entry = dir.openNextFile();
+    while (entry) {
+      if (!entry.isDirectory()) {
+        String name = entry.name();
+        const int slash = name.lastIndexOf('/');
+        if (slash >= 0) name = name.substring(slash + 1);
+        if (pluginFileNameOk(name, *plugin->files)) {
+          files.emplace_back(name, static_cast<uint32_t>(entry.size()));
+        }
+      }
+      entry.close();
+      entry = dir.openNextFile();
+    }
+  }
+  if (dir) dir.close();
+  std::sort(files.begin(), files.end(),
+            [](const std::pair<String, uint32_t> &a, const std::pair<String, uint32_t> &b) { return a.first < b.first; });
+
+  String body;
+  body.reserve(64 + files.size() * 48);
+  body += "{\"ok\":true,\"mime\":\"";
+  body += plugin->files->mime;
+  body += "\",\"files\":[";
+  for (size_t i = 0; i < files.size(); ++i) {
+    if (i > 0) body += ",";
+    body += "{\"name\":\"" + jsonEscape(files[i].first) + "\",\"size\":" + String(files[i].second) + "}";
+  }
+  body += "]}";
+  server_.send(200, "application/json", body);
+}
+
+// GET /api/plugins/file?id=&name= streams one file; DELETE removes it and
+// its line in the plugin's own index.
+void CompanionSyncManager::handlePluginFile() {
+  sendCorsHeaders();
+  const BuiltinPlugin *plugin = BuiltinPlugins::find(server_.arg("id").c_str());
+  const String name = server_.arg("name");
+  if (plugin == nullptr || plugin->files == nullptr || !pluginFileNameOk(name, *plugin->files)) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"Bad plugin file\"}");
+    return;
+  }
+  const String path = pluginFilesDir(*plugin) + "/" + name;
+  if (!SD_MMC.exists(path)) {
+    server_.send(404, "application/json", "{\"ok\":false,\"error\":\"File not found\"}");
+    return;
+  }
+
+  if (server_.method() == HTTP_GET) {
+    File file = SD_MMC.open(path, FILE_READ);
+    if (!file) {
+      server_.send(500, "application/json", "{\"ok\":false,\"error\":\"Cannot read file\"}");
+      return;
+    }
+    server_.sendHeader("Content-Disposition", String("attachment; filename=\"") + name + "\"");
+    server_.streamFile(file, plugin->files->mime);
+    file.close();
+    return;
+  }
+
+  if (!SD_MMC.remove(path)) {
+    server_.send(500, "application/json", "{\"ok\":false,\"error\":\"Cannot delete file\"}");
+    return;
+  }
+  if (plugin->files->index != nullptr) {
+    const String indexPath = String("/plugins/") + plugin->id + "/" + plugin->files->index;
+    File in = SD_MMC.open(indexPath, FILE_READ);
+    if (in) {
+      String kept;
+      while (in.available()) {
+        String line = in.readStringUntil('\n');
+        line.trim();
+        if (!line.isEmpty() && line != name) {
+          kept += line;
+          kept += "\n";
+        }
+      }
+      in.close();
+      File out = SD_MMC.open(indexPath, FILE_WRITE);
+      if (out) {
+        out.print(kept);
+        out.close();
+      }
+    }
+  }
+  logLine(String("Plugin file removed: ") + plugin->id + "/" + name);
+  server_.send(200, "application/json", "{\"ok\":true}");
 }
 
 void CompanionSyncManager::handlePluginsDelete() {
@@ -2256,7 +2405,7 @@ std::vector<CompanionSyncManager::RsvpChapter> CompanionSyncManager::readRsvpCha
 namespace {
 // Same tables as App.cpp (kScreensaver*Minutes): the app shows these values
 // and sends back their index.
-constexpr uint16_t kAppScreensaverTimeoutMinutes[] = {1, 2, 3, 5, 10, 15, 20, 30};
+constexpr uint16_t kAppScreensaverTimeoutMinutes[] = {1, 2, 3, 5, 10, 15, 20, 30, 0};  // 0 = off
 constexpr uint16_t kAppScreensaverAutoOffMinutes[] = {0, 5, 10, 15, 20, 30, 45, 60};
 constexpr uint16_t kAppSleepGuardMinutes[] = {0, 5, 10, 15, 20, 30, 45, 60};
 // App::ScreensaverMode values still in use (1, 4 and 5 are retired).
@@ -2437,7 +2586,7 @@ String CompanionSyncManager::settingsJson() {
   // to show the choices (minutes, the reader's own colors and font names).
   body += ",\"device\":{";
   body += "\"screensaverMode\":" + String(preferences_.getUChar("scrn_sv", 7));
-  body += ",\"screensaverTimeout\":" + String(std::min<uint8_t>(preferences_.getUChar("scrn_tmo", 2), 7));
+  body += ",\"screensaverTimeout\":" + String(std::min<uint8_t>(preferences_.getUChar("scrn_tmo", 2), 8));
   body += ",\"screensaverAutoOff\":" + String(std::min<uint8_t>(preferences_.getUChar("scrn_aof", 0), 7));
   body += ",\"sleepGuard\":" + String(std::min<uint8_t>(preferences_.getUChar("scrn_slp", 0), 7));
   body += ",\"batteryStyle\":" +
@@ -2457,6 +2606,7 @@ String CompanionSyncManager::settingsJson() {
           String(std::min<uint8_t>(preferences_.getUChar("lib_sort", 0), kAppLibrarySortCount - 1));
   body += ",\"autoUpdate\":" + jsonBool(preferences_.getBool("ota_auto", true));
   body += ",\"bluetooth\":" + jsonBool(preferences_.getBool("ble_on", false));
+  body += ",\"wifiSession\":" + String(std::min<uint8_t>(preferences_.getUChar("wifi_sess", 0), 4));
   body += ",\"helpHints\":" + jsonBool(preferences_.getBool("help_hints", true));
   body += ",\"savePointNames\":" + jsonBool(preferences_.getBool("sp_name_cust", true));
   body += "}";
@@ -2504,6 +2654,33 @@ String CompanionSyncManager::settingsJson() {
   body += preferences_.getBool("dev_mode", false) ? "true" : "false";
   body += "}}";
   return body;
+}
+
+String CompanionSyncManager::settingsJsonForBle() {
+  const bool openHere = !active_;
+  if (openHere) {
+    preferences_.begin(kPrefsNamespace, false);
+  }
+  const String json = settingsJson();
+  if (openHere) {
+    preferences_.end();
+  }
+  return json;
+}
+
+bool CompanionSyncManager::applySettingsFromBle(const String &body, String &error) {
+  const bool openHere = !active_;
+  if (openHere) {
+    preferences_.begin(kPrefsNamespace, false);
+  }
+  const bool ok = applySettingsJson(body, error);
+  if (openHere) {
+    preferences_.end();
+  }
+  if (ok) {
+    settingsChanged_ = true;
+  }
+  return ok;
 }
 
 bool CompanionSyncManager::applySettingsJson(const String &body, String &error) {
@@ -2725,13 +2902,14 @@ bool CompanionSyncManager::applySettingsJson(const String &body, String &error) 
     int max;
   };
   const IndexSetting indexSettings[] = {
-      {"screensaverTimeout", "scrn_tmo", 7},
+      {"screensaverTimeout", "scrn_tmo", 8},
       {"screensaverAutoOff", "scrn_aof", 7},
       {"sleepGuard", "scrn_slp", 7},
       {"batteryStyle", "bat_style", DisplayManager::kBatteryStyleCount - 1},
       {"menuPalette", "nano_pal", DisplayManager::nanoPaletteCount() - 1},
       {"menuLayout", "nano_lay", kAppNanoLayoutCount - 1},
       {"librarySort", "lib_sort", kAppLibrarySortCount - 1},
+      {"wifiSession", "wifi_sess", 4},  // App.cpp kPrefWifiSession
   };
   for (const IndexSetting &setting : indexSettings) {
     if (readJsonInt(body, setting.json, intValue)) {

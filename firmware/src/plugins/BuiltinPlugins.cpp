@@ -11,34 +11,37 @@
 // Aktywne/Biblioteka redesign. The rest are still placeholder entries so
 // the screens can be reviewed with real enable/disable state before more
 // real plugins exist.
+static const BuiltinPluginFiles kDictaphoneFiles = {
+    "recordings", ".wav", "recordings/index.txt", "audio/wav"};
+
 static const BuiltinPlugin kBuiltinPlugins[] = {
     {"dictaphone", "Dyktafon",
      "Nagrywa dzwiek z mikrofonu na karte SD. Odtwarzaj i zarzadzaj "
      "nagraniami w bibliotece.",
-     DictaphonePlugin::vtable()},
+     DictaphonePlugin::vtable(), &kDictaphoneFiles},
     {"focus-timer", "Klepsydra",
      "Sesje skupienia sterowane odwracaniem urzadzenia — postaw na "
      "krotszym boku, by zaczac, poloz plasko, by zapauzowac.",
-     FocusTimerPlugin::vtable()},
+     FocusTimerPlugin::vtable(), nullptr},
     {"rss", "RSS",
      "Dodaj adresy kanalow RSS/Atom, pobierz je przez WiFi i czytaj "
      "artykuly na urzadzeniu.",
-     RssPlugin::vtable()},
+     RssPlugin::vtable(), nullptr},
     {"night-reading", "Tryb nocnego czytania",
      "Automatycznie przyciemnia ekran i wlacza cieplejszy odcien po zachodzie slonca.",
-     PlaceholderPlugins::nightReading()},
+     PlaceholderPlugins::nightReading(), nullptr},
     {"page-counter", "Licznik stron",
      "Pokazuje szacowana liczbe przeczytanych stron w biezacej sesji.",
-     PlaceholderPlugins::pageCounter()},
+     PlaceholderPlugins::pageCounter(), nullptr},
     {"quote-highlight", "Cytaty",
      "Zaznacz fragment tekstu i zapisz go jako cytat do pozniejszego przejrzenia.",
-     PlaceholderPlugins::quoteHighlight()},
+     PlaceholderPlugins::quoteHighlight(), nullptr},
     {"reading-stats", "Statystyki czytania",
      "Wykresy tempa czytania i czasu spedzonego w ksiazkach w ostatnim tygodniu.",
-     PlaceholderPlugins::readingStats()},
+     PlaceholderPlugins::readingStats(), nullptr},
     {"notes-sync", "Notatki",
      "Synchronizuje notatki z aplikacja towarzyszaca na telefonie.",
-     PlaceholderPlugins::notesSync()},
+     PlaceholderPlugins::notesSync(), nullptr},
 };
 
 static constexpr size_t kBuiltinPluginCount =

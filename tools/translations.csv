@@ -354,6 +354,9 @@ DictStr.MicUnavailable;Mikrofon niedostępny;Mic unavailable;Micrófono no dispo
 DictStr.RecordingFailed;Nagrywanie nie powiodło się;Recording failed;Grabación fallida;Enregistrement échoué;Aufnahme fehlgeschlagen;Înregistrare eșuată
 DictStr.TryAgain;Spróbuj ponownie;Try again;Inténtalo de nuevo;Réessayez;Erneut versuchen;Încearcă din nou
 DictStr.PeakAbbrev;Pzm;Lvl;Niv;Niv;Peg;Niv
+DictStr.Stop;Zatrzymaj;Stop;Detener;Arrêter;Stopp;Oprește
+DictStr.CardWriteFailed;Nie mogę zapisać na kartę;Cannot write to the card;No puedo escribir en la tarjeta;Écriture sur la carte impossible;Kann nicht auf die Karte schreiben;Nu pot scrie pe card
+DictStr.Recording;Nagrywam;Recording;Grabando;Enregistrement;Aufnahme läuft;Înregistrez
 TrKey4.BatteryStyleColon;Wskaźnik baterii: ;Battery indicator: ;Indicador de batería: ;Indicateur batterie : ;Akkuanzeige: ;Indicator baterie: 
 TrKey4.BatteryStyleIconPercent;Ikona + %;Icon + %;Icono + %;Icône + %;Symbol + %;Pictogramă + %
 TrKey4.BatteryStyleNumberInIcon;Liczba w ikonie;Number in icon;Número en icono;Chiffre dans l'icône;Zahl im Symbol;Număr în pictogramă
@@ -595,3 +598,40 @@ TrKey4.WizTip10;kolory i czcionkę tekstu zmienisz na ekranie Wygląd czytania w
 TrKey4.WizWifiRescan;Szukaj ponownie;Search again;Buscar de nuevo;Rechercher à nouveau;Erneut suchen;Caută din nou
 TrKey4.WizWifiRescanHint;Wi-Fi jest potrzebne, żeby pobrać czcionki i książki;Wi-Fi is needed to download typefaces and books;El Wi-Fi hace falta para descargar tipografías y libros;Le Wi-Fi sert à télécharger polices et livres;WLAN wird für Schriften und Bücher gebraucht;Wi-Fi e necesar pentru fonturi și cărți
 TrKey4.WizWifiNoneSub;Sprawdź router albo podejdź bliżej i szukaj ponownie;Check the router or move closer, then search again;Revisa el router o acércate y busca de nuevo;Vérifiez le routeur ou rapprochez-vous, puis relancez;Prüfe den Router oder geh näher ran und such erneut;Verifică routerul sau apropie-te și caută din nou
+TrKey4.WifiFailPassword;Złe hasło do sieci;Wrong network password;Contraseña de red incorrecta;Mot de passe réseau incorrect;Falsches WLAN-Passwort;Parolă de rețea greșită
+TrKey4.WifiFailNotFound;Nie widzę tej sieci;This network is out of range;Esta red no está al alcance;Ce réseau est hors de portée;Dieses Netz ist nicht in Reichweite;Rețeaua nu e în raza de acoperire
+TrKey4.WifiFailNoAnswer;Router nie odpowiada;The router does not answer;El router no responde;Le routeur ne répond pas;Der Router antwortet nicht;Routerul nu răspunde
+TrKey4.WifiFailBusy;Radio zajęte, spróbuj za chwilę;The radio is busy, try again shortly;La radio está ocupada, prueba en un momento;La radio est occupée, réessayez bientôt;Funk belegt, gleich nochmal versuchen;Radioul e ocupat, încearcă imediat
+TrKey4.SaverOff;Wyłączony;Off;Apagado;Désactivé;Aus;Oprit
+TrKey4.FontDamaged;Plik czcionki był uszkodzony, pobiorę go ponownie;The font file was damaged, it will download again;El archivo de fuente estaba dañado, se descargará de nuevo;Le fichier de police était abîmé, il sera retéléchargé;Die Schriftdatei war beschädigt, sie wird neu geladen;Fișierul fontului era deteriorat, se descarcă din nou
+TrKey4.FontMissing;Tej czcionki nie ma na karcie;This font is not on the card;Esta fuente no está en la tarjeta;Cette police n'est pas sur la carte;Diese Schrift ist nicht auf der Karte;Fontul nu e pe card
+TrKey4.FontUsingAtkinson;Na razie czytasz w Atkinson;Reading in Atkinson for now;Por ahora lees en Atkinson;Lecture en Atkinson pour l'instant;Vorerst liest du in Atkinson;Deocamdată citești în Atkinson
+TrKey4.WifiSessionColon;Sieć dla apki: ;App network: ;Red para la app: ;Réseau appli : ;Netz für die App: ;Rețea aplicație: 
+TrKey4.WifiSessionStandard;30 s po starcie;30 s after start;30 s tras encender;30 s au démarrage;30 s nach dem Start;30 s după pornire
+TrKey4.WifiSessionWhole;cała sesja;whole session;toda la sesión;toute la session;ganze Sitzung;toată sesiunea
+TrKey4.WifiSessionAuto;auto;auto;auto;auto;auto;auto
+TrKey4.WifiSessionNotAdvised;(niezalecane);(not advised);(no recomendado);(déconseillé);(nicht empfohlen);(nerecomandat)
+TrKey4.SdSetupAssetsTitle;Pobierz zasoby czytnika na kartę;Download the reader's files to the card;Descarga los archivos del lector a la tarjeta;Téléchargez les fichiers du lecteur sur la carte;Lade die Dateien des Readers auf die Karte;Descarcă fișierele cititorului pe card
+TrKey4.SdSetupAssetsSub;Na tej karcie nie ma czcionek czytnika. Pobiorę je przez Wi-Fi.;This card has none of the reader's fonts. They download over Wi-Fi.;Esta tarjeta no tiene las fuentes del lector. Se descargan por Wi-Fi.;Cette carte n'a pas les polices du lecteur. Elles se téléchargent par Wi-Fi.;Auf dieser Karte fehlen die Schriften des Readers. Sie kommen per WLAN.;Cardul nu are fonturile cititorului. Le descarc prin Wi-Fi.
+TrKey4.SdSetupDownload;Pobierz;Download;Descargar;Télécharger;Laden;Descarcă
+TrKey4.SdSetupDecline;Nie pobieram;Not now;Ahora no;Pas maintenant;Nicht jetzt;Nu acum
+TrKey4.SdSetupNoWifiTitle;Brak zapisanej sieci Wi-Fi;No saved Wi-Fi network;No hay red Wi-Fi guardada;Aucun réseau Wi-Fi enregistré;Kein WLAN gespeichert;Nicio rețea Wi-Fi salvată
+TrKey4.SdSetupNoWifiSub;Zapisz sieć w aplikacji Flower: Czytnik kart, potem Z telefonu;Save one in the Flower app: Card reader, then From phone;Guarda una en la app Flower: Lector de tarjetas, luego Desde el móvil;Enregistrez-en un dans l'appli Flower : Lecteur de carte, puis Depuis le téléphone;Speichere eins in der Flower-App: Kartenleser, dann Vom Handy;Salvează una în aplicația Flower: Cititor de card, apoi De pe telefon
+TrKey4.CardReaderTitleShort;Czytnik kart;Card reader;Lector de tarjetas;Lecteur de carte;Kartenleser;Cititor de card
+TrKey4.SdSetupDownloading;Pobieram zasoby na kartę;Downloading to the card;Descargando a la tarjeta;Téléchargement sur la carte;Lade auf die Karte;Descarc pe card
+TrKey4.SdSetupDownloadingSub;Nie wyłączaj czytnika. Po pobraniu uruchomi się ponownie.;Keep the reader on. It restarts when the download is done.;No apagues el lector. Se reiniciará al terminar.;Laissez le lecteur allumé. Il redémarre à la fin.;Reader nicht ausschalten. Er startet danach neu.;Nu opri cititorul. Repornește la final.
+TrKey4.SdSetupFonts;Czcionki;Fonts;Fuentes;Polices;Schriften;Fonturi
+TrKey4.SdSetupBooks;Książki startowe;Starter books;Libros de inicio;Livres de départ;Startbücher;Cărți de început
+TrKey4.SdSetupFailedTitle;Nie udało się pobrać;The download failed;La descarga falló;Le téléchargement a échoué;Download fehlgeschlagen;Descărcarea a eșuat
+TrKey4.SdSetupFailedSub;Sprawdź Wi-Fi i spróbuj ponownie;Check the Wi-Fi and try again;Revisa el Wi-Fi e inténtalo de nuevo;Vérifiez le Wi-Fi et réessayez;WLAN prüfen und erneut versuchen;Verifică Wi-Fi-ul și încearcă din nou
+TrKey4.SdSetupRetry;Ponów;Retry;Reintentar;Réessayer;Erneut;Reîncearcă
+TrKey4.SdSetupDoneTitle;Karta gotowa;The card is ready;La tarjeta está lista;La carte est prête;Die Karte ist bereit;Cardul e gata
+TrKey4.SdSetupDoneSub;Uruchamiam czytnik ponownie;Restarting the reader;Reiniciando el lector;Redémarrage du lecteur;Reader startet neu;Repornesc cititorul
+TrKey4.CardReaderTitle;Tryb czytnika kart;Card reader mode;Modo lector de tarjetas;Mode lecteur de carte;Kartenleser-Modus;Mod cititor de card
+TrKey4.CardReaderCard;Karta;Card;Tarjeta;Carte;Karte;Card
+TrKey4.CardReaderFree;wolne;free;libre;libre;frei;liber
+TrKey4.CardReaderBooks;książki:;books:;libros:;livres :;Bücher:;cărți:
+TrKey4.CardReaderFonts;czcionki:;fonts:;fuentes:;polices :;Schriften:;fonturi:
+TrKey4.CardReaderFooter;Czytanie wróci po pobraniu zasobów, formacie albo wymianie karty;Reading comes back after the download, a format or another card;La lectura vuelve tras descargar, formatear o cambiar la tarjeta;La lecture revient après téléchargement, formatage ou autre carte;Lesen geht wieder nach Download, Formatieren oder Kartenwechsel;Citirea revine după descărcare, formatare sau alt card
+TrKey4.CardReaderUsb;Przez USB;Over USB;Por USB;Par USB;Per USB;Prin USB
+TrKey4.CardReaderPhone;Z telefonu;From phone;Desde el móvil;Depuis le téléphone;Vom Handy;De pe telefon

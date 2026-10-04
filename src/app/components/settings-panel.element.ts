@@ -14,6 +14,7 @@ import {
 } from "../device/api";
 import { HttpDeviceApi } from "../device/http-api";
 import { APP_VERSION } from "../../shared/config";
+import { setSoftColors, softColors } from "../ui/reader-look";
 import { LANG_NAMES, SUPPORTED_LANGS, chooseLang, chosenLang, tr, type SupportedLang } from "../i18n/index";
 import { icons } from "../ui/icons";
 import { rangeFill, rgb565, sharedStyles } from "../ui/theme";
@@ -163,6 +164,10 @@ export class SettingsPanel extends LitElement {
       </div>
       <span class="section-title">${tr("set.group.app")}</span>
       <div class="list">
+        ${this.onReader
+          ? this.switchRow(tr("set.advanced"), s.devMode, (v) => this.put({ devMode: v }), tr("set.advanced.desc"))
+          : nothing}
+        ${this.switchRow(tr("set.softColors"), softColors(), (v) => this.setSoft(v), tr("set.softColors.desc"))}
         ${row("language", icons.globe(), tr("set.language"), LANG_NAMES[chosenLang() ?? (s.language as SupportedLang)] ?? "")}
         ${row("help", icons.help(), tr("set.help"))}
         ${row("about", icons.chip(), tr("set.about"), `${tr("set.appVersion")} ${APP_VERSION}`)}
@@ -393,7 +398,7 @@ export class SettingsPanel extends LitElement {
         ${this.selectRow(tr("set.saver"), d.screensaverMode, o.screensaverModes.map((m) => [m, tr(`set.saver.${m}`)] as [number, string]), (v) =>
           this.putDevice({ screensaverMode: v }),
         )}
-        ${this.selectRow(tr("set.saverAfter"), d.screensaverTimeout, minutes(o.screensaverTimeoutMin, false), (v) =>
+        ${this.selectRow(tr("set.saverAfter"), d.screensaverTimeout, minutes(o.screensaverTimeoutMin, true), (v) =>
           this.putDevice({ screensaverTimeout: v }),
         )}
         ${this.selectRow(tr("set.autoOff"), d.screensaverAutoOff, minutes(o.screensaverAutoOffMin, true), (v) =>
@@ -439,6 +444,11 @@ export class SettingsPanel extends LitElement {
       <div class="list">
         ${d ? this.switchRow(tr("set.autoUpdate"), d.autoUpdate, (v) => this.putDevice({ autoUpdate: v }), tr("set.autoUpdate.desc")) : nothing}
         ${d ? this.switchRow(tr("set.bluetooth"), d.bluetooth, (v) => this.putDevice({ bluetooth: v }), tr("set.bluetooth.desc")) : nothing}
+        ${d
+          ? this.selectRow(tr("set.wifiSession"), d.wifiSession ?? 0, [0, 1, 2, 3, 4].map((i) => [i, tr(`set.wifiSession.${i}`)] as [number, string]), (v) =>
+              this.putDevice({ wifiSession: v }),
+            )
+          : nothing}
         ${this.sliderRow(
           tr("set.wifiTimeout"),
           this.wifiTimeoutMinutes,
@@ -591,6 +601,13 @@ export class SettingsPanel extends LitElement {
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
     }
+  }
+
+  private setSoft(on: boolean) {
+    setSoftColors(on);
+    this.requestUpdate();
+    // The shell redraws its colors from the reader's settings.
+    this.dispatchEvent(new CustomEvent("device-settings-changed", { bubbles: true, composed: true, detail: this.settings ?? undefined }));
   }
 
   private async put(patch: Partial<DeviceSettings>) {

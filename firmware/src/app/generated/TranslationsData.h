@@ -300,7 +300,7 @@ inline const char *trKey3Lookup(uint8_t keyIndex, uint8_t langIndex) {
 }
 
 inline const char *trKey4Lookup(uint8_t keyIndex, uint8_t langIndex) {
-  static const char *const kTable[122][6] = {
+  static const char *const kTable[159][6] = {
       {"Battery indicator: ", "Indicador de bater\xED""a: ", "Indicateur batterie : ", "Akkuanzeige: ", "Indicator baterie: ", "Wska\xB3""nik baterii: "},  // BatteryStyleColon
       {"Icon + %", "Icono + %", "Ic\xF4""ne + %", "Symbol + %", "Pictogram\x8B"" + %", "Ikona + %"},  // BatteryStyleIconPercent
       {"Number in icon", "N\xFA""mero en icono", "Chiffre dans l'ic\xF4""ne", "Zahl im Symbol", "Num\x8B""r \xEE""n pictogram\x8B""", "Liczba w ikonie"},  // BatteryStyleNumberInIcon
@@ -423,6 +423,43 @@ inline const char *trKey4Lookup(uint8_t keyIndex, uint8_t langIndex) {
       {"Search again", "Buscar de nuevo", "Rechercher \xE0"" nouveau", "Erneut suchen", "Caut\x8B"" din nou", "Szukaj ponownie"},  // WizWifiRescan
       {"Wi-Fi is needed to download typefaces and books", "El Wi-Fi hace falta para descargar tipograf\xED""as y libros", "Le Wi-Fi sert \xE0"" t\xE9""l\xE9""charger polices et livres", "WLAN wird f\xFC""r Schriften und B\xFC""cher gebraucht", "Wi-Fi e necesar pentru fonturi \x8D""i c\x8B""r\x8F""i", "Wi-Fi jest potrzebne, \xB5""eby pobra\x9B"" czcionki i ksi\x97""\xB5""ki"},  // WizWifiRescanHint
       {"Check the router or move closer, then search again", "Revisa el router o ac\xE9""rcate y busca de nuevo", "V\xE9""rifiez le routeur ou rapprochez-vous, puis relancez", "Pr\xFC""fe den Router oder geh n\xE4""her ran und such erneut", "Verific\x8B"" routerul sau apropie-te \x8D""i caut\x8B"" din nou", "Sprawd\xB3"" router albo podejd\xB3"" bli\xB5""ej i szukaj ponownie"},  // WizWifiNoneSub
+      {"Wrong network password", "Contrase\xF1""a de red incorrecta", "Mot de passe r\xE9""seau incorrect", "Falsches WLAN-Passwort", "Parol\x8B"" de re\x8F""ea gre\x8D""it\x8B""", "Z\x83""e has\x83""o do sieci"},  // WifiFailPassword
+      {"This network is out of range", "Esta red no est\xE1"" al alcance", "Ce r\xE9""seau est hors de port\xE9""e", "Dieses Netz ist nicht in Reichweite", "Re\x8F""eaua nu e \xEE""n raza de acoperire", "Nie widz\x99"" tej sieci"},  // WifiFailNotFound
+      {"The router does not answer", "El router no responde", "Le routeur ne r\xE9""pond pas", "Der Router antwortet nicht", "Routerul nu r\x8B""spunde", "Router nie odpowiada"},  // WifiFailNoAnswer
+      {"The radio is busy, try again shortly", "La radio est\xE1"" ocupada, prueba en un momento", "La radio est occup\xE9""e, r\xE9""essayez bient\xF4""t", "Funk belegt, gleich nochmal versuchen", "Radioul e ocupat, \xEE""ncearc\x8B"" imediat", "Radio zaj\x99""te, spr\xF3""buj za chwil\x99"""},  // WifiFailBusy
+      {"Off", "Apagado", "D\xE9""sactiv\xE9""", "Aus", "Oprit", "Wy\x83""\x97""czony"},  // SaverOff
+      {"The font file was damaged, it will download again", "El archivo de fuente estaba da\xF1""ado, se descargar\xE1"" de nuevo", "Le fichier de police \xE9""tait ab\xEE""m\xE9"", il sera ret\xE9""l\xE9""charg\xE9""", "Die Schriftdatei war besch\xE4""digt, sie wird neu geladen", "Fi\x8D""ierul fontului era deteriorat, se descarc\x8B"" din nou", "Plik czcionki by\x83"" uszkodzony, pobior\x99"" go ponownie"},  // FontDamaged
+      {"This font is not on the card", "Esta fuente no est\xE1"" en la tarjeta", "Cette police n'est pas sur la carte", "Diese Schrift ist nicht auf der Karte", "Fontul nu e pe card", "Tej czcionki nie ma na karcie"},  // FontMissing
+      {"Reading in Atkinson for now", "Por ahora lees en Atkinson", "Lecture en Atkinson pour l'instant", "Vorerst liest du in Atkinson", "Deocamdat\x8B"" cite\x8D""ti \xEE""n Atkinson", "Na razie czytasz w Atkinson"},  // FontUsingAtkinson
+      {"App network: ", "Red para la app: ", "R\xE9""seau appli : ", "Netz f\xFC""r die App: ", "Re\x8F""ea aplica\x8F""ie: ", "Sie\x9B"" dla apki: "},  // WifiSessionColon
+      {"30 s after start", "30 s tras encender", "30 s au d\xE9""marrage", "30 s nach dem Start", "30 s dup\x8B"" pornire", "30 s po starcie"},  // WifiSessionStandard
+      {"whole session", "toda la sesi\xF3""n", "toute la session", "ganze Sitzung", "toat\x8B"" sesiunea", "ca\x83""a sesja"},  // WifiSessionWhole
+      {"auto", "auto", "auto", "auto", "auto", "auto"},  // WifiSessionAuto
+      {"(not advised)", "(no recomendado)", "(d\xE9""conseill\xE9"")", "(nicht empfohlen)", "(nerecomandat)", "(niezalecane)"},  // WifiSessionNotAdvised
+      {"Download the reader's files to the card", "Descarga los archivos del lector a la tarjeta", "T\xE9""l\xE9""chargez les fichiers du lecteur sur la carte", "Lade die Dateien des Readers auf die Karte", "Descarc\x8B"" fi\x8D""ierele cititorului pe card", "Pobierz zasoby czytnika na kart\x99"""},  // SdSetupAssetsTitle
+      {"This card has none of the reader's fonts. They download over Wi-Fi.", "Esta tarjeta no tiene las fuentes del lector. Se descargan por Wi-Fi.", "Cette carte n'a pas les polices du lecteur. Elles se t\xE9""l\xE9""chargent par Wi-Fi.", "Auf dieser Karte fehlen die Schriften des Readers. Sie kommen per WLAN.", "Cardul nu are fonturile cititorului. Le descarc prin Wi-Fi.", "Na tej karcie nie ma czcionek czytnika. Pobior\x99"" je przez Wi-Fi."},  // SdSetupAssetsSub
+      {"Download", "Descargar", "T\xE9""l\xE9""charger", "Laden", "Descarc\x8B""", "Pobierz"},  // SdSetupDownload
+      {"Not now", "Ahora no", "Pas maintenant", "Nicht jetzt", "Nu acum", "Nie pobieram"},  // SdSetupDecline
+      {"No saved Wi-Fi network", "No hay red Wi-Fi guardada", "Aucun r\xE9""seau Wi-Fi enregistr\xE9""", "Kein WLAN gespeichert", "Nicio re\x8F""ea Wi-Fi salvat\x8B""", "Brak zapisanej sieci Wi-Fi"},  // SdSetupNoWifiTitle
+      {"Save one in the Flower app: Card reader, then From phone", "Guarda una en la app Flower: Lector de tarjetas, luego Desde el m\xF3""vil", "Enregistrez-en un dans l'appli Flower : Lecteur de carte, puis Depuis le t\xE9""l\xE9""phone", "Speichere eins in der Flower-App: Kartenleser, dann Vom Handy", "Salveaz\x8B"" una \xEE""n aplica\x8F""ia Flower: Cititor de card, apoi De pe telefon", "Zapisz sie\x9B"" w aplikacji Flower: Czytnik kart, potem Z telefonu"},  // SdSetupNoWifiSub
+      {"Card reader", "Lector de tarjetas", "Lecteur de carte", "Kartenleser", "Cititor de card", "Czytnik kart"},  // CardReaderTitleShort
+      {"Downloading to the card", "Descargando a la tarjeta", "T\xE9""l\xE9""chargement sur la carte", "Lade auf die Karte", "Descarc pe card", "Pobieram zasoby na kart\x99"""},  // SdSetupDownloading
+      {"Keep the reader on. It restarts when the download is done.", "No apagues el lector. Se reiniciar\xE1"" al terminar.", "Laissez le lecteur allum\xE9"". Il red\xE9""marre \xE0"" la fin.", "Reader nicht ausschalten. Er startet danach neu.", "Nu opri cititorul. Reporne\x8D""te la final.", "Nie wy\x83""\x97""czaj czytnika. Po pobraniu uruchomi si\x99"" ponownie."},  // SdSetupDownloadingSub
+      {"Fonts", "Fuentes", "Polices", "Schriften", "Fonturi", "Czcionki"},  // SdSetupFonts
+      {"Starter books", "Libros de inicio", "Livres de d\xE9""part", "Startb\xFC""cher", "C\x8B""r\x8F""i de \xEE""nceput", "Ksi\x97""\xB5""ki startowe"},  // SdSetupBooks
+      {"The download failed", "La descarga fall\xF3""", "Le t\xE9""l\xE9""chargement a \xE9""chou\xE9""", "Download fehlgeschlagen", "Desc\x8B""rcarea a e\x8D""uat", "Nie uda\x83""o si\x99"" pobra\x9B"""},  // SdSetupFailedTitle
+      {"Check the Wi-Fi and try again", "Revisa el Wi-Fi e int\xE9""ntalo de nuevo", "V\xE9""rifiez le Wi-Fi et r\xE9""essayez", "WLAN pr\xFC""fen und erneut versuchen", "Verific\x8B"" Wi-Fi-ul \x8D""i \xEE""ncearc\x8B"" din nou", "Sprawd\xB3"" Wi-Fi i spr\xF3""buj ponownie"},  // SdSetupFailedSub
+      {"Retry", "Reintentar", "R\xE9""essayer", "Erneut", "Re\xEE""ncearc\x8B""", "Pon\xF3""w"},  // SdSetupRetry
+      {"The card is ready", "La tarjeta est\xE1"" lista", "La carte est pr\xEA""te", "Die Karte ist bereit", "Cardul e gata", "Karta gotowa"},  // SdSetupDoneTitle
+      {"Restarting the reader", "Reiniciando el lector", "Red\xE9""marrage du lecteur", "Reader startet neu", "Repornesc cititorul", "Uruchamiam czytnik ponownie"},  // SdSetupDoneSub
+      {"Card reader mode", "Modo lector de tarjetas", "Mode lecteur de carte", "Kartenleser-Modus", "Mod cititor de card", "Tryb czytnika kart"},  // CardReaderTitle
+      {"Card", "Tarjeta", "Carte", "Karte", "Card", "Karta"},  // CardReaderCard
+      {"free", "libre", "libre", "frei", "liber", "wolne"},  // CardReaderFree
+      {"books:", "libros:", "livres :", "B\xFC""cher:", "c\x8B""r\x8F""i:", "ksi\x97""\xB5""ki:"},  // CardReaderBooks
+      {"fonts:", "fuentes:", "polices :", "Schriften:", "fonturi:", "czcionki:"},  // CardReaderFonts
+      {"Reading comes back after the download, a format or another card", "La lectura vuelve tras descargar, formatear o cambiar la tarjeta", "La lecture revient apr\xE8""s t\xE9""l\xE9""chargement, formatage ou autre carte", "Lesen geht wieder nach Download, Formatieren oder Kartenwechsel", "Citirea revine dup\x8B"" desc\x8B""rcare, formatare sau alt card", "Czytanie wr\xF3""ci po pobraniu zasob\xF3""w, formacie albo wymianie karty"},  // CardReaderFooter
+      {"Over USB", "Por USB", "Par USB", "Per USB", "Prin USB", "Przez USB"},  // CardReaderUsb
+      {"From phone", "Desde el m\xF3""vil", "Depuis le t\xE9""l\xE9""phone", "Vom Handy", "De pe telefon", "Z telefonu"},  // CardReaderPhone
   };
   return kTable[keyIndex][langIndex];
 }
@@ -606,7 +643,7 @@ inline const char *uiTextLookup(uint8_t keyIndex, uint8_t langIndex) {
 }
 
 inline const char *dictStrLookup(uint8_t keyIndex, uint8_t langIndex) {
-  static const char *const kTable[15][6] = {
+  static const char *const kTable[18][6] = {
       {"Record", "Grabar", "Enregistrer", "Aufnehmen", "\xCE""nregistreaz\x8B""", "Nagraj"},  // Record
       {"Library", "Biblioteca", "Biblioth\xE8""que", "Bibliothek", "Biblioteca", "Biblioteka"},  // Library
       {"LIBRARY", "BIBLIOTECA", "BIBLIOTH\xC8""QUE", "BIBLIOTHEK", "BIBLIOTECA", "BIBLIOTEKA"},  // LibraryTitle
@@ -622,6 +659,9 @@ inline const char *dictStrLookup(uint8_t keyIndex, uint8_t langIndex) {
       {"Recording failed", "Grabaci\xF3""n fallida", "Enregistrement \xE9""chou\xE9""", "Aufnahme fehlgeschlagen", "\xCE""nregistrare e\x8D""uat\x8B""", "Nagrywanie nie powiod\x83""o si\x99"""},  // RecordingFailed
       {"Try again", "Int\xE9""ntalo de nuevo", "R\xE9""essayez", "Erneut versuchen", "\xCE""ncearc\x8B"" din nou", "Spr\xF3""buj ponownie"},  // TryAgain
       {"Lvl", "Niv", "Niv", "Peg", "Niv", "Pzm"},  // PeakAbbrev
+      {"Stop", "Detener", "Arr\xEA""ter", "Stopp", "Opre\x8D""te", "Zatrzymaj"},  // Stop
+      {"Cannot write to the card", "No puedo escribir en la tarjeta", "\xC9""criture sur la carte impossible", "Kann nicht auf die Karte schreiben", "Nu pot scrie pe card", "Nie mog\x99"" zapisa\x9B"" na kart\x99"""},  // CardWriteFailed
+      {"Recording", "Grabando", "Enregistrement", "Aufnahme l\xE4""uft", "\xCE""nregistrez", "Nagrywam"},  // Recording
   };
   return kTable[keyIndex][langIndex];
 }

@@ -21,6 +21,7 @@ class DictaphoneCore {
         Playing,        // Playback in progress
         Rename,         // Rename dialog
         ConfirmDelete,  // Delete confirmation
+        Error,          // A take that never reached the card
     };
 
     DictaphoneCore(PluginDisplayService* display, PluginAudioService* audio,
@@ -77,6 +78,11 @@ class DictaphoneCore {
     void drawPlaying();
     void drawRename();
     void drawConfirmDelete();
+    void drawError();
+    void showError(uint32_t nowMs);
+    // Recording has ended (tap or on its own): lists the take or shows the
+    // error.
+    void finishRecording(uint32_t nowMs);
 
     // Format time as MM:SS
     void formatTime(uint32_t ms, char* buf, size_t bufSize);
@@ -141,6 +147,8 @@ class DictaphoneCore {
     // slider). Any new tap within kActionCooldownMs of the last one is
     // treated as that bounce and ignored.
     uint32_t lastActionMs_ = 0;
+    uint32_t errorShownMs_ = 0;
+    static constexpr uint32_t kErrorShowMs = 3000;
     static constexpr uint32_t kActionCooldownMs = 350;
 };
 

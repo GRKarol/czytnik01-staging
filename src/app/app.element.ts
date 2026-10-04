@@ -20,6 +20,7 @@ import { dandelionIcon } from "./components/flower-icon";
 import "./components/converter-panel.element";
 import "./components/library-panel.element";
 import "./components/settings-panel.element";
+import "./components/plugins-panel.element";
 import "./components/onboarding.element";
 import "./components/pwa-install-dialog.element";
 import "./components/tutorial-wizard.element";
@@ -31,7 +32,6 @@ import {
   type Book,
   type DeviceInfo,
   type DeviceSettings,
-  type PluginInfo,
 } from "./device/api";
 import { HttpDeviceApi } from "./device/http-api";
 import { getTutorialStatus } from "./onboarding/onboarding-store";
@@ -40,6 +40,7 @@ import { deviceLangToSupported } from "./i18n/lang-map";
 import { icons } from "./ui/icons";
 import { sharedStyles, themeTokens } from "./ui/theme";
 import { applyLook, lookFromSettings, saveLook, savedLook } from "./ui/reader-look";
+import { applyFont, fontFromSettings, saveFont, savedFont } from "./ui/reader-font";
 import { decodePicture, readerCoverColor, readerInitials } from "./books/pictures";
 
 type View = "home" | "library" | "converter" | "plugins" | "more";
@@ -66,12 +67,6 @@ export class CzytnikApp extends LitElement {
   @state() private scanningQr = false;
   private qrFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
-  @state() private plugins: PluginInfo[] = [];
-  @state() private pluginsLoading = false;
-  @state() private pluginsError = "";
-  @state() private rssFeeds: string[] = [];
-  @state() private rssBusy = false;
-  @state() private newFeedUrl = "";
 
   // Start tab once connected: the open book and the reader's state.
   @state() private books: Book[] = [];
@@ -86,6 +81,7 @@ export class CzytnikApp extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     applyLook(this, savedLook());
+    applyFont(this, savedFont());
     this.refreshFromReader();
     this.unsubApi = onDeviceApiChange(() => this.refreshFromReader());
     this.unsubLang = onLangChange(() => this.requestUpdate());
@@ -152,7 +148,7 @@ export class CzytnikApp extends LitElement {
 
   /** Language, colors and the DEV badge follow the reader's settings. */
   private adoptSettings(s: DeviceSettings): void {
-    this.devMode = s.devMode;
+    this.setDevMode(s.devMode);
     if (!this.onReader) return;
     followReaderLang(deviceLangToSupported(s.language));
     const look = lookFromSettings(s);
@@ -160,15 +156,26 @@ export class CzytnikApp extends LitElement {
       saveLook(look);
       applyLook(this, look);
     }
+    const font = fontFromSettings(s);
+    if (font) {
+      saveFont(font);
+      applyFont(this, font);
+    }
   }
 
   private async refreshFromReader(): Promise<void> {
     try {
       this.adoptSettings(await deviceApi.getSettings());
     } catch {
-      this.devMode = false;
+      this.setDevMode(false);
     }
     if (this.onReader) void this.loadOverview();
+  }
+
+  /** Plugins is a tab of the reader's advanced mode only. */
+  private setDevMode(on: boolean): void {
+    this.devMode = on;
+    if (!on && this.view === "plugins") this.view = "home";
   }
 
   private get onReader(): boolean {
@@ -295,7 +302,7 @@ export class CzytnikApp extends LitElement {
           ${this.navButton("home", tr("nav.home"), icons.home())}
           ${this.navButton("library", tr("nav.books"), icons.books())}
           ${this.navButton("converter", tr("nav.convert"), icons.convert())}
-          ${this.navButton("plugins", tr("nav.plugins"), icons.plugins())}
+          ${this.devMode ? this.navButton("plugins", tr("nav.plugins"), icons.plugins()) : nothing}
           ${this.navButton("more", tr("nav.more"), icons.more())}
         </nav>
       `,
@@ -313,7 +320,6 @@ export class CzytnikApp extends LitElement {
 
   private switchView(v: View): void {
     this.view = v;
-    if (v === "plugins") void this.loadPlugins();
     if (v === "home" && this.onReader) void this.loadOverview();
   }
 
@@ -326,7 +332,7 @@ export class CzytnikApp extends LitElement {
       case "converter":
         return html`<h1>${tr("nav.convert")}</h1><converter-panel></converter-panel>`;
       case "plugins":
-        return this.renderPlugins();
+        return html`<h1>${tr("nav.plugins")}</h1><plugins-panel></plugins-panel>`;
       case "more":
         return html`<h1>${tr("nav.more")}</h1>
           <settings-panel .readerFirmware=${this.readerFirmware} .connection=${this.link?.transport.label ?? ""}></settings-panel>`;
@@ -491,109 +497,6 @@ export class CzytnikApp extends LitElement {
       <small>${desc}</small>
     </button>`;
   }
-
-  // ─── Plugins ─────────────────────────────────────────────────────────────
-
-  private renderPlugins() {
-    const rss = this.plugins.find((p) => p.id === "rss");
-    return html`
-      <h1>${tr("nav.plugins")}</h1>
-      <p class="muted">${tr("plugins.lead")}</p>
-      ${this.pluginsError ? html`<p class="error">${this.pluginsError}</p>` : nothing}
-      ${!this.connected
-        ? html`<p class="notice">${tr("plugins.offline")}</p>`
-        : this.pluginsLoading
-          ? html`<p class="muted">${tr("common.loading")}</p>`
-          : html`
-              ${this.plugins.length === 0
-                ? html`<p class="notice">${tr("plugins.none")}</p>`
-                : html`<div class="list">
-                    ${this.plugins.map(
-                      (p) => html`<div class="item">
-                        <span class="tile-ico">${icons.plugins(20)}</span>
-                        <span class="label">
-                          <span class="title">${p.name}</span>
-                          ${p.builtin ? html`<small>${tr("plugins.builtin")}</small>` : nothing}
-                        </span>
-                        <span class=${p.active ? "pill on" : "pill"}>
-                          ${p.active ? tr("plugins.active") : tr("plugins.inactive")}
-                        </span>
-                      </div>`,
-                    )}
-                  </div>`}
-              ${rss?.active ? this.renderRssEditor() : nothing}
-            `}
-    `;
-  }
-
-  private renderRssEditor() {
-    return html`
-      <span class="section-title">${tr("rss.title")}</span>
-      <div class="list">
-        ${this.rssFeeds.length === 0
-          ? html`<div class="item"><span class="label"><small>${tr("rss.none")}</small></span></div>`
-          : this.rssFeeds.map(
-              (url, i) => html`<div class="item">
-                <span class="label"><span class="feed">${url}</span></span>
-                <button class="icon-btn" ?disabled=${this.rssBusy} @click=${() => this.removeRssFeed(i)} aria-label=${tr("rss.remove")}>
-                  ${icons.close(18)}
-                </button>
-              </div>`,
-            )}
-        <div class="item">
-          <input
-            class="input"
-            type="url"
-            placeholder="https://example.com/rss.xml"
-            .value=${this.newFeedUrl}
-            @input=${(e: Event) => (this.newFeedUrl = (e.target as HTMLInputElement).value)}
-          />
-          <button class="btn small primary" ?disabled=${this.rssBusy} @click=${this.addRssFeed}>${tr("rss.add")}</button>
-        </div>
-      </div>
-    `;
-  }
-
-  private async loadPlugins(): Promise<void> {
-    if (!this.connected) return;
-    this.pluginsLoading = true;
-    this.pluginsError = "";
-    try {
-      this.plugins = await deviceApi.getPlugins();
-      this.rssFeeds = await deviceApi.getRssFeeds();
-    } catch (err) {
-      this.pluginsError = err instanceof Error ? err.message : String(err);
-    } finally {
-      this.pluginsLoading = false;
-    }
-  }
-
-  private addRssFeed = async () => {
-    const url = this.newFeedUrl.trim();
-    if (!url) return;
-    this.rssBusy = true;
-    this.pluginsError = "";
-    try {
-      this.rssFeeds = await deviceApi.setRssFeeds([...this.rssFeeds, url]);
-      this.newFeedUrl = "";
-    } catch (err) {
-      this.pluginsError = err instanceof Error ? err.message : String(err);
-    } finally {
-      this.rssBusy = false;
-    }
-  };
-
-  private removeRssFeed = async (index: number) => {
-    this.rssBusy = true;
-    this.pluginsError = "";
-    try {
-      this.rssFeeds = await deviceApi.setRssFeeds(this.rssFeeds.filter((_, i) => i !== index));
-    } catch (err) {
-      this.pluginsError = err instanceof Error ? err.message : String(err);
-    } finally {
-      this.rssBusy = false;
-    }
-  };
 
   // ─── Connection ──────────────────────────────────────────────────────────
 

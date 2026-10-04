@@ -96,6 +96,29 @@ static String resolveSandboxedPath(const char* relativePath) {
     return sStorageRoot + relativePath;
 }
 
+/// Creates every missing directory on the way to fullPath (FAT's mkdir makes
+/// one level only). With fileItself false the last component is a file name
+/// and is left alone. A fresh card has no /plugins at all: one mkdir of
+/// /plugins/dictaphone/recordings failed there, every recording file then
+/// failed to open, and the dictaphone fell back to its library half a second
+/// into each take.
+static bool ensureSdDirs(const String& fullPath, bool fileItself) {
+    int end = fileItself ? static_cast<int>(fullPath.length()) : fullPath.lastIndexOf('/');
+    if (fileItself && fullPath.endsWith("/")) --end;
+    if (end <= 0) return true;
+    int slash = 0;
+    while (true) {
+        slash = fullPath.indexOf('/', slash + 1);
+        const int stop = (slash == -1 || slash > end) ? end : slash;
+        const String dir = fullPath.substring(0, stop);
+        if (!SD_MMC.exists(dir) && !SD_MMC.mkdir(dir)) {
+            ESP_LOGW(TAG, "mkdir failed: %s", dir.c_str());
+            return false;
+        }
+        if (stop == end) return true;
+    }
+}
+
 // ─── Display Service Wrappers ───────────────────────────────────────────────
 
 static void bridgeRenderFocusTimerScreen(const char* mode, const char* genre,
@@ -389,6 +412,7 @@ static bool bridgeAudioStartRecording(const char* relativePath) {
     if (!sRecorder) return false;
     String fullPath = resolveSandboxedPath(relativePath);
     if (fullPath.isEmpty()) return false;
+    if (!ensureSdDirs(fullPath, false)) return false;
     return sRecorder->startRecording(fullPath.c_str());
 }
 
@@ -625,6 +649,7 @@ static bool bridgeStorageWriteFile(const char* relativePath, const uint8_t* data
 
     String fullPath = resolveSandboxedPath(relativePath);
     if (fullPath.isEmpty()) return false;
+    if (!ensureSdDirs(fullPath, false)) return false;
 
     File file = SD_MMC.open(fullPath, FILE_WRITE);
     if (!file) return false;
@@ -654,7 +679,7 @@ static bool bridgeStorageMkdir(const char* relativePath) {
     String fullPath = resolveSandboxedPath(relativePath);
     if (fullPath.isEmpty()) return false;
 
-    return SD_MMC.mkdir(fullPath);
+    return ensureSdDirs(fullPath, true);
 }
 
 static bool bridgeStorageLoadInt(const char* relativePath, const char* key, int32_t* out,

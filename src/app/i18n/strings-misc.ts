@@ -142,6 +142,15 @@ export const MISC_STRINGS: Record<string, Entry> = {
   "err.assetDownload": { pl: "Nie udało się pobrać {name}: HTTP {status}.", en: "Couldn't download {name}: HTTP {status}.", de: "{name} konnte nicht geladen werden: HTTP {status}.", es: "No se pudo descargar {name}: HTTP {status}.", fr: "Impossible de télécharger {name} : HTTP {status}.", ro: "{name} nu a putut fi descărcat: HTTP {status}." },
 
   // ─── Onboarding (first start of the app) ───────────────────────────────
+  "onb.lang.title": { pl: "Wybierz język", en: "Choose your language", de: "Sprache wählen", es: "Elige tu idioma", fr: "Choisissez votre langue", ro: "Alege limba" },
+  "onb.lang.text": {
+    pl: "Aplikacja będzie w tym języku. Zmienisz go później w Więcej.",
+    en: "The app will use this language. You can change it later under More.",
+    de: "Die App nutzt diese Sprache. Später änderst du sie unter Mehr.",
+    es: "La app usará este idioma. Puedes cambiarlo luego en Más.",
+    fr: "L'app utilisera cette langue. Vous pourrez la changer dans Plus.",
+    ro: "Aplicația va folosi această limbă. O poți schimba din Mai mult.",
+  },
   "onb.hello.title": { pl: "Cześć, tu Flower.", en: "Hi, this is Flower.", de: "Hallo, hier ist Flower.", es: "Hola, esto es Flower.", fr: "Bonjour, ici Flower.", ro: "Salut, aici Flower." },
   "onb.hello.text": {
     pl: "Aplikacja Twojego czytnika. Stąd wysyłasz książki, zmieniasz ustawienia i aktualizujesz czytnik. Bez kabli.",

@@ -35,6 +35,12 @@ class CompanionSyncManager {
 
   /** Apply settings from JSON body (used by BleApi for set-settings command). */
   bool applySettingsJson(const String &body, String &error);
+  /** Bluetooth get/set-settings: same JSON as the HTTP /api/settings, also
+   *  while the Wi-Fi side is off (its Preferences handle is only open
+   *  between begin() and end(); without it every write was lost). A
+   *  successful set marks the settings changed for the reader to reload. */
+  String settingsJsonForBle();
+  bool applySettingsFromBle(const String &body, String &error);
 
   /** Library access for the Flower app's chapter editor (word index). */
   void setStorage(StorageManager *storage) { storage_ = storage; }
@@ -84,6 +90,8 @@ class CompanionSyncManager {
   static void handleCapabilitiesStatic();
   static void handlePluginsStatic();
   static void handlePluginsDeleteStatic();
+  static void handlePluginFilesStatic();
+  static void handlePluginFileStatic();
   static void handlePowerWifiTimeoutStatic();
   static void handleOptionsStatic();
   static void handleNotFoundStatic();
@@ -115,6 +123,8 @@ class CompanionSyncManager {
   void handleCapabilities();
   void handlePlugins();
   void handlePluginsDelete();
+  void handlePluginFiles();
+  void handlePluginFile();
   void handlePowerWifiTimeout();
   void handleOptions();
   void handleNotFound();

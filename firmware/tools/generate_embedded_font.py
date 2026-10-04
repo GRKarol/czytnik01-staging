@@ -33,10 +33,10 @@ import unicodedata
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
 
-CANVAS_WIDTH = 112
-CANVAS_HEIGHT = 128
+CANVAS_WIDTH = 160
+CANVAS_HEIGHT = 176
 ORIGIN_X = 10
-BASELINE_Y = 76
+BASELINE_Y = 110
 ALPHA_THRESHOLD = 16
 FONT_TOP_PADDING = 4
 FONT_BOTTOM_PADDING = 2
@@ -80,10 +80,23 @@ def base_ascii_fallback(codepoint: int) -> str:
 
 def load_font(ttf_path: pathlib.Path, point_size: int) -> ImageFont.FreeTypeFont:
     font = ImageFont.truetype(str(ttf_path), point_size)
+    # Variable fonts: weight 400, other axes at their defaults. The old
+    # set_variation_by_name("Regular") never matched (Pillow lists names as
+    # bytes) and left Bitter at its default Thin and Merriweather at Light.
     try:
-        font.set_variation_by_name("Regular")
+        axes = font.get_variation_axes()
     except Exception:
-        pass
+        return font
+    values = []
+    for axis in axes:
+        name = axis.get("name", b"")
+        if isinstance(name, bytes):
+            name = name.decode("ascii", "ignore")
+        if name.lower() == "weight":
+            values.append(min(max(400, axis["minimum"]), axis["maximum"]))
+        else:
+            values.append(axis["default"])
+    font.set_variation_by_axes(values)
     return font
 
 
@@ -112,6 +125,34 @@ def measure_ink_span(ttf_path: pathlib.Path, point_size: int, cmap: dict) -> int
     if bottom < top:
         raise RuntimeError("no ink found while measuring font")
     return bottom - top + 1
+
+
+def measure_char_ink_height(ttf_path: pathlib.Path, point_size: int, ch: str) -> int:
+    font = load_font(ttf_path, point_size)
+    img = Image.new("L", (CANVAS_WIDTH, CANVAS_HEIGHT), 0)
+    draw = ImageDraw.Draw(img)
+    draw.text((ORIGIN_X, BASELINE_Y), ch, font=font, fill=255, anchor="ls")
+    bbox = img.point(lambda v: 255 if v > ALPHA_THRESHOLD else 0).getbbox()
+    if bbox is None:
+        raise RuntimeError(f"no ink found for {ch!r}")
+    return bbox[3] - bbox[1]
+
+
+def optical_size(ttf_path: pathlib.Path, point_size: int) -> float:
+    """Mean of x-height and cap height in px: what the eye reads as "size".
+
+    The full ink span (calibrate_point_size) is dominated by accents on
+    capitals and descenders, so families with tall diacritics or long tails
+    came out with letters half as big as Atkinson's at the same setting."""
+    return (measure_char_ink_height(ttf_path, point_size, "x") +
+            measure_char_ink_height(ttf_path, point_size, "H")) / 2
+
+
+def calibrate_point_size_optical(ttf_path: pathlib.Path, target: float) -> int:
+    trial = 60
+    guess = max(8, round(trial * target / optical_size(ttf_path, trial)))
+    candidates = range(max(8, guess - 2), guess + 3)
+    return min(candidates, key=lambda pt: abs(optical_size(ttf_path, pt) - target))
 
 
 def calibrate_point_size(ttf_path: pathlib.Path, cmap: dict, target_height: int) -> int:
@@ -320,6 +361,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--font-label", required=True)
     parser.add_argument("--target-height", type=int, required=True,
                          help="Desired glyph raster height in px (auto-calibrates point size).")
+    parser.add_argument("--target-optical", type=float, default=None,
+                         help="Calibrate on the mean of x-height and cap height (px) instead of "
+                              "the full ink span. Atkinson, the default reading face: 41.5 at "
+                              "72 pt (large), 25.5 at 44 pt (medium).")
     parser.add_argument("--point-size", type=int, default=None,
                          help="Skip calibration and use this point size directly.")
     return parser.parse_args()
@@ -331,6 +376,8 @@ def main() -> None:
     cmap = ttfont.getBestCmap()
 
     point_size = args.point_size
+    if point_size is None and args.target_optical is not None:
+        point_size = calibrate_point_size_optical(args.ttf_path, args.target_optical)
     if point_size is None:
         point_size = calibrate_point_size(args.ttf_path, cmap, args.target_height)
 

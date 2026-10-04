@@ -7,6 +7,30 @@ import { rgb565 } from "./theme";
  * opens in the reader's colors before it reconnects.
  */
 const STORE_LOOK = "flower.readerLook";
+const STORE_SOFT = "flower.lookSoft";
+
+/**
+ * Loud palettes (a saturated page, or text that barely stands off it) are
+ * fine on the reader's small bar and tiring on a phone screen full of
+ * forms. With softening on (the default) such a page becomes a neutral one
+ * tinted with the reader's color, and the text a near-black or near-white
+ * ink; the accent stays the reader's.
+ */
+export function softColors(): boolean {
+  try {
+    return localStorage.getItem(STORE_SOFT) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setSoftColors(on: boolean): void {
+  try {
+    localStorage.setItem(STORE_SOFT, on ? "1" : "0");
+  } catch {
+    /* ignored */
+  }
+}
 
 export type LookVars = Record<string, string>;
 
@@ -43,10 +67,14 @@ export function lookFromSettings(s: DeviceSettings): LookVars | null {
     bg = classic.bg;
     fg = classic.fg;
   }
-  const bgCss = rgb565(bg);
-  const fgCss = rgb565(fg);
+  let bgCss = rgb565(bg);
+  let fgCss = rgb565(fg);
   const accentCss = rgb565(accent);
   const light = luminance(bg) > 0.5;
+  if (softColors() && (saturation(bg) > 0.45 || contrast(bg, fg) < 7)) {
+    bgCss = blend(bg, light ? [244, 242, 237] : [18, 19, 22], light ? 28 : 22);
+    fgCss = blend(fg, light ? [22, 23, 26] : [241, 241, 243], 20);
+  }
   return {
     "--bg": bgCss,
     "--surface": mix(fgCss, bgCss, light ? 6 : 8),
@@ -63,6 +91,33 @@ export function lookFromSettings(s: DeviceSettings): LookVars | null {
     "--on-accent": luminance(accent) > 0.6 ? "#000000" : "#ffffff",
     "color-scheme": light ? "light" : "dark",
   };
+}
+
+/** percent % of an RGB565 color over an RGB base, as rgb() (theme-color reads it). */
+function blend(value: number, base: [number, number, number], percent: number): string {
+  const rgb = [
+    (((value >> 11) & 0x1f) * 255) / 31,
+    (((value >> 5) & 0x3f) * 255) / 63,
+    ((value & 0x1f) * 255) / 31,
+  ];
+  const out = rgb.map((c, i) => Math.round((c * percent + base[i] * (100 - percent)) / 100));
+  return `rgb(${out[0]}, ${out[1]}, ${out[2]})`;
+}
+
+/** HSV saturation of an RGB565 color, 0..1. */
+function saturation(value: number): number {
+  const r = ((value >> 11) & 0x1f) / 31;
+  const g = ((value >> 5) & 0x3f) / 63;
+  const b = (value & 0x1f) / 31;
+  const max = Math.max(r, g, b);
+  return max === 0 ? 0 : (max - Math.min(r, g, b)) / max;
+}
+
+/** WCAG contrast ratio between two RGB565 colors (1..21). */
+function contrast(a: number, b: number): number {
+  const la = luminance(a);
+  const lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
 function luminance(value: number): number {

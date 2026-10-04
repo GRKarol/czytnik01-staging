@@ -82,6 +82,15 @@ class OtaUpdater {
                    void *context = nullptr) const;
   void disconnectWiFi() const;
 
+  // Why connectWiFiUserAttempt() failed.
+  enum class WifiFailure : uint8_t { None, WrongPassword, NotFound, NoAnswer, Busy };
+  // The Wi-Fi screen's "connect to this network": no fallback to other
+  // remembered networks, and it gives up as soon as the router has said no
+  // twice (wrong password, network gone) instead of waiting out the whole
+  // timeout. On success the session is open, as with connectWiFi().
+  bool connectWiFiUserAttempt(const Config &config, WifiFailure &failure, StatusCallback callback = nullptr,
+                              void *context = nullptr) const;
+
   /**
    * Pobiera pojedynczy nazwany asset z release'u (jak installAsset) i zapisuje
    * go na SD pod destPath, zamiast flashować przez HTTPUpdate. Nie łączy ani
