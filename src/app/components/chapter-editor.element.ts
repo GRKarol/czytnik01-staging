@@ -1,12 +1,16 @@
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { deviceApi, type BookParagraph, type ChapterMark } from "../device/api";
+import { onLangChange, tr } from "../i18n/index";
 
 type Filter = "all" | "chapters" | "suggested";
 
 const FIRST_PAGE = 200;
 const PAGE = 400;
-const WORDS = 16;
+// Whole paragraphs, so the search sees every word (a PDF page is often one
+// paragraph); the list shows the first SHOWN of them.
+const WORDS = 6000;
+const SHOWN = 24;
 const MAX_TITLE = 60;
 const ROWS_STEP = 200;
 
@@ -26,9 +30,45 @@ function looksLikeHeading(p: BookParagraph): boolean {
   return p.n <= 8 && letters.length >= 3 && letters === letters.toLocaleUpperCase("pl");
 }
 
+function clip(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > MAX_TITLE ? `${flat.slice(0, MAX_TITLE - 1).trimEnd()}…` : flat;
+}
+
 function defaultTitle(p: BookParagraph): string {
-  const text = p.t.replace(/\s+/g, " ").trim();
-  return text.length > MAX_TITLE ? `${text.slice(0, MAX_TITLE - 1).trimEnd()}…` : text;
+  return clip(p.t.split(" ").slice(0, SHOWN).join(" "));
+}
+
+/** The paragraph's words as the reader numbers them (joined by single spaces). */
+function wordsOf(p: BookParagraph): string[] {
+  return p.t.split(" ");
+}
+
+interface Hit {
+  /** Reader word number the match falls in. */
+  w: number;
+  before: string;
+  match: string;
+  after: string;
+}
+
+/** Every place `q` shows up in the paragraph, as the word it starts in. */
+function hitsIn(p: BookParagraph, q: string): Hit[] {
+  const lower = p.t.toLocaleLowerCase("pl");
+  const hits: Hit[] = [];
+  let at = lower.indexOf(q);
+  while (at >= 0 && hits.length < 20) {
+    const wordOffset = (p.t.slice(0, at).match(/ /g) ?? []).length;
+    const words = wordsOf(p);
+    hits.push({
+      w: p.w + wordOffset,
+      before: words.slice(Math.max(0, wordOffset - 6), wordOffset).join(" ") + (wordOffset > 0 ? " " : ""),
+      match: p.t.slice(at, at + q.length),
+      after: p.t.slice(at + q.length).split(" ").slice(0, 10).join(" "),
+    });
+    at = lower.indexOf(q, at + q.length);
+  }
+  return hits;
 }
 
 /**
@@ -59,16 +99,19 @@ export class ChapterEditor extends LitElement {
   @state() private notice = "";
   private original = "";
   private cancelled = false;
+  private unsubLang: (() => void) | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.cancelled = false;
+    this.unsubLang = onLangChange(() => this.requestUpdate());
     void this.load();
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.cancelled = true;
+    this.unsubLang?.();
   }
 
   private async load(): Promise<void> {
@@ -118,27 +161,27 @@ export class ChapterEditor extends LitElement {
     const suggestions = this.suggestions;
     const newSuggestions = suggestions.filter((p) => !this.chapters.has(p.w));
     return html`
-      <div class="sheet" role="dialog" aria-label="Rozdziały">
+      <div class="sheet" role="dialog" aria-label=${tr("lib.chapters")}>
         <header>
           <div>
-            <small>Rozdziały ${this.custom ? "· ustawione w aplikacji" : "· znalezione w tekście"}</small>
+            <small>${tr("lib.chapters")} · ${this.custom ? tr("ch.custom") : tr("ch.detected")}</small>
             <strong>${this.bookTitle || this.bookName}</strong>
           </div>
-          <button class="icon" @click=${this.close} aria-label="Zamknij">✕</button>
+          <button class="icon" @click=${this.close} aria-label=${tr("common.close")}>✕</button>
         </header>
 
         ${this.loading
-          ? html`<p class="lead">Czytnik przygotowuje tekst książki… Przy dużym EPUB-ie może to potrwać minutę.</p>`
+          ? html`<p class="lead">${tr("ch.preparing")}</p>`
           : this.renderEditor(suggestions, newSuggestions)}
 
         <footer>
           ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
           ${this.notice ? html`<p class="ok">${this.notice}</p>` : nothing}
           <button class="cta ghost" ?disabled=${!!this.busy} @click=${this.resetToDetected}>
-            Przywróć z tekstu
+            ${tr("ch.reset")}
           </button>
           <button class="cta" ?disabled=${!!this.busy || !this.dirty || this.loading} @click=${this.save}>
-            ${this.busy || `Zapisz (${this.chapters.size})`}
+            ${this.busy || tr("ch.save", { n: this.chapters.size })}
           </button>
         </footer>
       </div>
@@ -149,10 +192,7 @@ export class ChapterEditor extends LitElement {
     const list = this.visibleParagraphs(suggestions);
     const loadedPercent = this.paragraphCount ? Math.round((this.paragraphs.length / this.paragraphCount) * 100) : 100;
     return html`
-      <p class="lead">
-        Stuknij akapit, od którego zaczyna się rozdział. Tytuł możesz zmienić. Na czytniku rozdziały pojawią się
-        po wyjściu z ekranu Aplikacja.
-      </p>
+      <p class="lead">${tr("ch.lead")}</p>
 
       ${this.chapters.size > 0
         ? html`<div class="chips">
@@ -160,23 +200,23 @@ export class ChapterEditor extends LitElement {
               .sort((a, b) => a[0] - b[0])
               .map(
                 ([w, t], i) => html`<button class="chip" @click=${() => this.jumpTo(w)}>
-                  <span>${i + 1}</span>${t || "Bez tytułu"}
+                  <span>${i + 1}</span>${t || tr("ch.untitled")}
                 </button>`,
               )}
           </div>`
-        : html`<p class="hint">Ta książka nie ma jeszcze rozdziałów.</p>`}
+        : html`<p class="hint">${tr("ch.none")}</p>`}
 
       ${newSuggestions.length > 0
         ? html`<div class="suggest">
-            <span>Wygląda na nagłówki: <strong>${newSuggestions.length}</strong></span>
-            <button class="btn" @click=${() => this.addAll(newSuggestions)}>Dodaj wszystkie</button>
+            <span>${tr("ch.suggest", { n: newSuggestions.length })}</span>
+            <button class="btn" @click=${() => this.addAll(newSuggestions)}>${tr("ch.addAll")}</button>
           </div>`
         : nothing}
 
       <div class="toolbar">
         <input
           type="search"
-          placeholder="Szukaj w tekście, np. Rozdział"
+          placeholder=${tr("ch.search")}
           .value=${this.query}
           @input=${(e: Event) => {
             this.query = (e.target as HTMLInputElement).value;
@@ -184,37 +224,60 @@ export class ChapterEditor extends LitElement {
           }}
         />
         <div class="filters">
-          ${this.filterButton("all", "Cały tekst")}
-          ${this.filterButton("chapters", `Rozdziały ${this.chapters.size}`)}
-          ${this.filterButton("suggested", `Nagłówki ${suggestions.length}`)}
+          ${this.filterButton("all", tr("ch.filter.all"))}
+          ${this.filterButton("chapters", tr("ch.filter.chapters", { n: this.chapters.size }))}
+          ${this.filterButton("suggested", tr("ch.filter.headings", { n: suggestions.length }))}
         </div>
       </div>
 
       ${this.loadingMore
         ? html`<div class="progress"><span style="width:${loadedPercent}%"></span></div>
-            <p class="hint">Wczytuję resztę tekstu: ${loadedPercent}%</p>`
+            <p class="hint">${tr("ch.loadingRest", { n: loadedPercent })}</p>`
         : nothing}
 
       <ol class="paragraphs">
-        ${list.items.map((p) => this.renderParagraph(p))}
+        ${list.items.map((p) => {
+          const q = this.query.trim().toLocaleLowerCase("pl");
+          // A match past the paragraph's start: show where it is.
+          return q && !p.t.slice(0, 120).toLocaleLowerCase("pl").startsWith(q) && this.filter === "all"
+            ? this.renderHits(p, q)
+            : this.renderParagraph(p);
+        })}
       </ol>
       ${list.more
-        ? html`<button class="btn ghost more" @click=${() => (this.rows += ROWS_STEP)}>Pokaż dalszy tekst</button>`
+        ? html`<button class="btn ghost more" @click=${() => (this.rows += ROWS_STEP)}>${tr("ch.more")}</button>`
         : nothing}
-      ${list.items.length === 0 && !this.loadingMore ? html`<p class="hint">Nic nie pasuje.</p>` : nothing}
+      ${list.items.length === 0 && !this.loadingMore ? html`<p class="hint">${tr("ch.noMatch")}</p>` : nothing}
     `;
   }
 
   private visibleParagraphs(suggestions: BookParagraph[]): { items: BookParagraph[]; more: boolean } {
     let items =
       this.filter === "chapters"
-        ? this.paragraphs.filter((p) => this.chapters.has(p.w))
+        ? this.paragraphs.filter((p) => [...this.chapters.keys()].some((w) => p.w <= w && w < p.w + Math.max(1, p.n)))
         : this.filter === "suggested"
           ? suggestions
           : this.paragraphs;
     const q = this.query.trim().toLocaleLowerCase("pl");
     if (q) items = items.filter((p) => p.t.toLocaleLowerCase("pl").includes(q));
     return { items: items.slice(0, this.rows), more: items.length > this.rows };
+  }
+
+  /** Search results: the words around each match, a chapter can start right there. */
+  private renderHits(p: BookParagraph, q: string) {
+    const hits = hitsIn(p, q);
+    return html`
+      <li class="hits">
+        <span class="pos">${this.wordCount ? Math.floor((p.w / this.wordCount) * 100) : 0}%</span>
+        ${hits.map((h) => {
+          const isChapter = this.chapters.has(h.w);
+          return html`<button class=${isChapter ? "hit chapter" : "hit"} @click=${() => this.toggleAt(h)}>
+            <span class="words">…${h.before}<mark>${h.match}</mark>${h.after}…</span>
+            <span class="add">${isChapter ? tr("ch.isChapter") : tr("ch.addHere")}</span>
+          </button>`;
+        })}
+      </li>
+    `;
   }
 
   private filterButton(filter: Filter, label: string) {
@@ -242,16 +305,16 @@ export class ChapterEditor extends LitElement {
                 type="text"
                 maxlength=${MAX_TITLE}
                 .value=${title}
-                aria-label="Tytuł rozdziału"
+                aria-label=${tr("ch.chapterTitle")}
                 @input=${(e: Event) => this.rename(p.w, (e.target as HTMLInputElement).value)}
               />
-              <button class="remove" @click=${() => this.toggle(p)} aria-label="Usuń rozdział">✕</button>
+              <button class="remove" @click=${() => this.toggle(p)} aria-label=${tr("ch.remove")}>✕</button>
             </div>`
           : nothing}
         <button class="text" @click=${() => (isChapter ? this.jumpTo(p.w) : this.toggle(p))}>
           <span class="pos">${position}%</span>
-          <span class="words">${p.t}${p.n > WORDS ? "…" : ""}</span>
-          ${isChapter ? nothing : html`<span class="add">+ rozdział</span>`}
+          <span class="words">${wordsOf(p).slice(0, SHOWN).join(" ")}${p.n > SHOWN ? "…" : ""}</span>
+          ${isChapter ? nothing : html`<span class="add">${tr("ch.add")}</span>`}
         </button>
       </li>
     `;
@@ -261,6 +324,14 @@ export class ChapterEditor extends LitElement {
     const next = new Map(this.chapters);
     if (next.has(p.w)) next.delete(p.w);
     else next.set(p.w, defaultTitle(p));
+    this.chapters = next;
+    this.notice = "";
+  }
+
+  private toggleAt(hit: Hit): void {
+    const next = new Map(this.chapters);
+    if (next.has(hit.w)) next.delete(hit.w);
+    else next.set(hit.w, clip(hit.match + hit.after));
     this.chapters = next;
     this.notice = "";
   }
@@ -281,7 +352,10 @@ export class ChapterEditor extends LitElement {
   private async jumpTo(w: number): Promise<void> {
     this.filter = "all";
     this.query = "";
-    const index = this.paragraphs.findIndex((p) => p.w === w);
+    // A chapter set inside a paragraph scrolls to that paragraph.
+    let index = this.paragraphs.findIndex((p) => p.w <= w && w < p.w + Math.max(1, p.n));
+    if (index < 0) index = this.paragraphs.findIndex((p) => p.w === w);
+    if (index >= 0) w = this.paragraphs[index].w;
     if (index >= this.rows) this.rows = index + 20;
     await this.updateComplete;
     this.renderRoot.querySelector(`#p${w}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -289,19 +363,19 @@ export class ChapterEditor extends LitElement {
 
   private save = async () => {
     if (this.chapters.size === 0) {
-      this.error = "Dodaj przynajmniej jeden rozdział albo użyj „Przywróć z tekstu”.";
+      this.error = tr("ch.needOne");
       return;
     }
     this.error = "";
-    this.busy = "Zapisuję…";
+    this.busy = tr("common.saving");
     try {
       const list: ChapterMark[] = [...this.chapters.entries()]
         .sort((a, b) => a[0] - b[0])
-        .map(([w, t]) => ({ w, t: t.trim() || "Rozdział" }));
+        .map(([w, t]) => ({ w, t: t.trim() || tr("ch.defaultName") }));
       await deviceApi.setBookChapters(this.bookName, list);
       this.original = this.serialize();
       this.custom = true;
-      this.notice = "Zapisane na czytniku.";
+      this.notice = tr("ch.saved");
       this.dispatchEvent(new CustomEvent("saved", { bubbles: true, composed: true }));
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
@@ -311,16 +385,16 @@ export class ChapterEditor extends LitElement {
   };
 
   private resetToDetected = async () => {
-    if (this.custom && !confirm("Usunąć rozdziały ustawione w aplikacji i wrócić do tych z tekstu książki?")) return;
+    if (this.custom && !confirm(tr("ch.confirmReset"))) return;
     this.error = "";
-    this.busy = "Przywracam…";
+    this.busy = tr("ch.restoring");
     try {
       if (this.custom) await deviceApi.resetBookChapters(this.bookName);
       const first = await deviceApi.getBookText(this.bookName, 0, 1, 1);
       this.custom = first.custom;
       this.chapters = new Map(first.chapters.map((c) => [c.w, c.t]));
       this.original = this.serialize();
-      this.notice = "Rozdziały jak w tekście książki.";
+      this.notice = tr("ch.restored");
       this.dispatchEvent(new CustomEvent("saved", { bubbles: true, composed: true }));
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
@@ -330,7 +404,7 @@ export class ChapterEditor extends LitElement {
   };
 
   private close = () => {
-    if (this.dirty && !confirm("Zamknąć bez zapisywania zmian w rozdziałach?")) return;
+    if (this.dirty && !confirm(tr("ch.confirmClose"))) return;
     this.dispatchEvent(new CustomEvent("close", { bubbles: true, composed: true }));
   };
 
@@ -570,6 +644,37 @@ export class ChapterEditor extends LitElement {
     }
     li.heading .words {
       font-weight: 600;
+    }
+    .hits {
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      gap: 4px 8px;
+      padding: 8px;
+    }
+    .hits .pos {
+      grid-row: span 20;
+    }
+    .hit {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm, 9px);
+      background: transparent;
+      color: var(--ink);
+      text-align: left;
+      cursor: pointer;
+    }
+    .hit.chapter {
+      border-color: var(--accent);
+    }
+    mark {
+      background: rgba(20, 136, 216, 0.22);
+      color: inherit;
+      border-radius: 3px;
+      padding: 0 1px;
     }
     .add {
       font: 700 0.68rem var(--mn);

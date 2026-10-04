@@ -1,6 +1,7 @@
 import { LitElement, css, html, svg, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { BRAND_NAME, DEVICE_LABEL } from "../../shared/config";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { tr } from "../i18n/index";
 import type { PwaInstallDialog } from "./pwa-install-dialog.element";
 import { dandelionIcon } from "./flower-icon";
 
@@ -57,10 +58,10 @@ export class OnboardingWizard extends LitElement {
 
           <div class="footer">
             ${this.step > 0
-              ? html`<button class="link" @click=${() => (this.step -= 1)}>Wróć</button>`
-              : html`<button class="link" @click=${this.skip}>Pomiń</button>`}
+              ? html`<button class="link" @click=${() => (this.step -= 1)}>${tr("common.back")}</button>`
+              : html`<button class="link" @click=${this.skip}>${tr("common.skip")}</button>`}
             <button class="cta" @click=${this.next}>
-              ${this.step < 2 ? "Dalej" : "Zaczynamy"}
+              ${this.step < 2 ? tr("common.next") : tr("onb.start")}
             </button>
           </div>
         </div>
@@ -73,11 +74,8 @@ export class OnboardingWizard extends LitElement {
       case 0:
         return html`
           <div class="hero">${this.flower(120)}</div>
-          <h2>Cześć, tu ${BRAND_NAME}.</h2>
-          <p>
-            Aplikacja Twojego ${DEVICE_LABEL.toLowerCase()}a. Stąd wysyłasz książki, zarządzasz
-            ustawieniami i pobierasz pluginy. Bezprzewodowo, bez kabli.
-          </p>
+          <h2>${tr("onb.hello.title")}</h2>
+          <p>${tr("onb.hello.text")}</p>
         `;
       case 1: {
         // If standalone → skip install step entirely (proceed to step 2)
@@ -92,10 +90,10 @@ export class OnboardingWizard extends LitElement {
           // iOS → show numbered Share Sheet instructions (at least 2 steps)
           return html`
             <div class="hero soft">${this.iconAdd()}</div>
-            <h2>Dodaj do ekranu głównego</h2>
+            <h2>${tr("onb.ios.title")}</h2>
             <ol class="ios-steps">
-              <li>Naciśnij ikonę <strong>Udostępnij</strong> (kwadrat ze strzałką)</li>
-              <li>Wybierz <strong>„Dodaj do ekranu początkowego"</strong></li>
+              <li>${unsafeHTML(tr("onb.ios.step1"))}</li>
+              <li>${unsafeHTML(tr("onb.ios.step2"))}</li>
             </ol>
           `;
         }
@@ -104,9 +102,9 @@ export class OnboardingWizard extends LitElement {
         if (this.installAvailable) {
           return html`
             <div class="hero soft">${this.iconAdd()}</div>
-            <h2>Zainstaluj aplikację</h2>
-            <p>Dodaj ${BRAND_NAME} do ekranu głównego — będzie działać jak natywna aplikacja.</p>
-            <button class="cta" @click=${this.handleOnboardingInstall}>Zainstaluj</button>
+            <h2>${tr("onb.install.title")}</h2>
+            <p>${tr("onb.install.text")}</p>
+            <button class="cta" @click=${this.handleOnboardingInstall}>${tr("onb.install.btn")}</button>
           `;
         }
 
@@ -117,20 +115,9 @@ export class OnboardingWizard extends LitElement {
       case 2:
         return html`
           <div class="hero soft">${this.iconWifi()}</div>
-          <h2>Połącz urządzenie</h2>
-          <p>
-            Na ekranie startowym wybierz <strong>WiFi</strong>. Telefon przełączy się na chwilę do
-            sieci urządzenia (<code>${BRAND_NAME}-XXXX</code>) i zaczniecie się komunikować. iPhone
-            i Android działają tak samo.
-          </p>
-          <p class="hint">
-            Telefon może zapytać „Połączono, brak internetu" — to normalne, wybierz
-            <strong>„Połącz mimo to"</strong>, inaczej sam się rozłączy.
-          </p>
-          <p class="hint">
-            Na razie aplikacja działa też bez urządzenia — pełen interfejs z mockowanymi danymi,
-            żeby było co testować.
-          </p>
+          <h2>${tr("onb.connect.title")}</h2>
+          <p>${unsafeHTML(tr("onb.connect.text"))}</p>
+          <p class="hint">${unsafeHTML(tr("onb.connect.hint"))}</p>
         `;
       default:
         return html``;

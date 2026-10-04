@@ -1,3 +1,4 @@
+import { tr } from "../i18n/index";
 /**
  * Wyższego rzędu API urządzenia: biblioteka, ustawienia, plugins, dev mode.
  *
@@ -77,7 +78,58 @@ export interface DeviceSettings {
   // HUD metrics
   footerMetric: FooterMetric;
   batteryLabel: BatteryLabel;
+  /** Menu look, screensaver, battery, radios (firmware 0.4.03+), null before. */
+  device: ReaderDeviceSettings | null;
+  /** What the reader offers for those (its own colors, fonts, minutes). */
+  options: ReaderOptions | null;
 }
+
+/** Same names as the firmware's "device" section (CompanionSyncManager::settingsJson). */
+export interface ReaderDeviceSettings {
+  /** App::ScreensaverMode value: 7 book, 8 words, 0 life, 2 maze, 3 voronoi, 9 waves, 6 screen off. */
+  screensaverMode: number;
+  /** Indexes into options.screensaverTimeoutMin / screensaverAutoOffMin / sleepGuardMin. */
+  screensaverTimeout: number;
+  screensaverAutoOff: number;
+  sleepGuard: number;
+  /** 0 icon + %, 1 number in icon, 2 number only, 3 icon only. */
+  batteryStyle: number;
+  /** Index into options.focusColors, 254 = own color (focusRgb). */
+  focusColor: number;
+  focusRgb: number;
+  /** Index into options.palettes; 0 Classic follows the reading theme. */
+  menuPalette: number;
+  menuOwnAccent: boolean;
+  /** 0 tabs left, 1 right, 2 icons left, 3 icons right. */
+  menuLayout: number;
+  /** Index into options.menuFonts, -1 = same as the book. */
+  menuFont: number;
+  /** 0 recently read, 1 title, 2 author, 3 progress. */
+  librarySort: number;
+  autoUpdate: boolean;
+  bluetooth: boolean;
+  helpHints: boolean;
+  savePointNames: boolean;
+}
+
+export interface ReaderPalette {
+  /** Name as the reader calls it ("Classic", "Dracula"...). */
+  n: string;
+  /** Background, foreground, accent (RGB565); absent for Classic. */
+  c?: [number, number, number];
+}
+
+export interface ReaderOptions {
+  screensaverModes: number[];
+  screensaverTimeoutMin: number[];
+  screensaverAutoOffMin: number[];
+  sleepGuardMin: number[];
+  focusColors: number[];
+  palettes: ReaderPalette[];
+  menuFonts: string[];
+}
+
+export const FOCUS_COLOR_CUSTOM = 254;
 
 export interface Book {
   name: string;
@@ -92,6 +144,8 @@ export interface Book {
   hasSpine?: boolean;
   /** Chapters set in the app's chapter editor replace the detected ones. */
   customChapters?: boolean;
+  /** The book open on the reader now. */
+  current?: boolean;
 }
 
 export type PictureKind = "cover" | "spine";
@@ -214,6 +268,41 @@ export const DEFAULT_SETTINGS: DeviceSettings = {
   // HUD metrics
   footerMetric: "percentage",
   batteryLabel: "percent",
+  device: {
+    screensaverMode: 7,
+    screensaverTimeout: 2,
+    screensaverAutoOff: 0,
+    sleepGuard: 0,
+    batteryStyle: 0,
+    focusColor: 1,
+    focusRgb: 0x001f,
+    menuPalette: 0,
+    menuOwnAccent: false,
+    menuLayout: 0,
+    menuFont: -1,
+    librarySort: 0,
+    autoUpdate: true,
+    bluetooth: false,
+    helpHints: true,
+    savePointNames: true,
+  },
+  options: {
+    screensaverModes: [7, 8, 0, 2, 3, 9, 6],
+    screensaverTimeoutMin: [1, 2, 3, 5, 10, 15, 20, 30],
+    screensaverAutoOffMin: [0, 5, 10, 15, 20, 30, 45, 60],
+    sleepGuardMin: [0, 5, 10, 15, 20, 30, 45, 60],
+    focusColors: [0xf800, 0x001f, 0x07e0, 0xffe0, 0xfd20, 0xa01f],
+    palettes: [
+      { n: "Classic" },
+      { n: "Mocha", c: [0x18e5, 0xcebe, 0xf455] },
+      { n: "Dracula", c: [0x2946, 0xffde, 0xfbd8] },
+      { n: "Nord", c: [0x29a8, 0xef7e, 0x8e1a] },
+      { n: "Latte", c: [0xef9e, 0x4a6d, 0xd067] },
+      { n: "Sepia", c: [0xf77b, 0x3965, 0xb2a5] },
+      { n: "Forest", c: [0x1924, 0xdf3b, 0x7e2f] },
+    ],
+    menuFonts: ["Inter", "Noto Sans", "Atkinson", "Nunito", "Literata", "OpenDyslexic"],
+  },
 };
 
 export interface DeviceApi {
@@ -402,7 +491,8 @@ export class MockDeviceApi implements DeviceApi {
   }
 
   async listBooks(): Promise<Book[]> {
-    return this.delay(read<Book[]>(STORE_BOOKS, MOCK_BOOKS_SEED));
+    const books = read<Book[]>(STORE_BOOKS, MOCK_BOOKS_SEED);
+    return this.delay(books.map((b, i) => ({ ...b, current: i === 0 })));
   }
 
   async uploadBook(file: Blob, name: string, category: "book" | "article" = "book"): Promise<string> {
@@ -445,7 +535,7 @@ export class MockDeviceApi implements DeviceApi {
 
   async installOta(): Promise<void> {
     throw new Error(
-      "Wgranie firmware'u wymaga połączenia z urządzeniem. Najpierw połącz się przez WiFi.",
+      tr("err.otaNeedsDevice"),
     );
   }
 

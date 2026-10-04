@@ -1,3 +1,4 @@
+import { tr } from "../i18n/index";
 /**
  * Wspólny model dla wszystkich parserów: każdy konwerter zwraca strumień
  * eventów `BookEvent` (rozdział lub paragraf tekstu), które writer
@@ -107,7 +108,7 @@ export function writeRsvp(book: ParsedBook): string {
   const { title, author, source } = book.metadata;
   const lines: string[] = [
     `@rsvp ${RSVP_VERSION}`,
-    `@title ${directiveSafe(title || "Bez tytułu")}`,
+    `@title ${directiveSafe(title || tr("common.untitled"))}`,
   ];
   if (author) lines.push(`@author ${directiveSafe(author)}`);
   if (source) lines.push(`@source ${directiveSafe(source)}`);
@@ -130,7 +131,7 @@ export function writeRsvp(book: ParsedBook): string {
   if (chapterCount === 0) {
     // Wstaw pojedynczy rozdział po nagłówku, żeby firmware miał pierwsze
     // kotwiczne paragrafy do nawigacji.
-    lines.splice(4, 0, `@chapter ${directiveSafe(title || "Bez tytułu")}`);
+    lines.splice(4, 0, `@chapter ${directiveSafe(title || tr("common.untitled"))}`);
   }
 
   return lines.join("\n").trim() + "\n";

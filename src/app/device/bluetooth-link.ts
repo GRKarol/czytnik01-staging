@@ -11,6 +11,7 @@ import { DEVICE_BLE_SERVICE_UUID } from "../../shared/config";
 import type { DeviceCommand, DeviceEvent } from "../../shared/device-protocol";
 import { parseEvent } from "../../shared/device-protocol";
 import type { DeviceLink, TransportInfo } from "./device-link";
+import { tr } from "../i18n/index";
 
 // Placeholder UUID-y — dokończymy kiedy firmware będzie miał BLE.
 const CMD_CHAR_UUID = "f10e7e11-f10e-7e10-f10e-7e10f10e7e10";
@@ -39,7 +40,7 @@ export class BluetoothLink implements DeviceLink {
 
   async connect(): Promise<void> {
     if (!BluetoothLink.isSupported()) {
-      throw new Error("Web Bluetooth nie jest wspierany w tej przeglądarce.");
+      throw new Error(tr("err.webBluetooth"));
     }
     const device = await navigator.bluetooth.requestDevice({
       filters: [{ services: [DEVICE_BLE_SERVICE_UUID] }],
@@ -74,14 +75,14 @@ export class BluetoothLink implements DeviceLink {
   }
 
   async send(cmd: DeviceCommand): Promise<void> {
-    if (!this.cmdChar) throw new Error("Nie połączono z urządzeniem.");
+    if (!this.cmdChar) throw new Error(tr("err.notConnected"));
     const json = JSON.stringify(cmd) + "\n";
     await this.sendChunked(new TextEncoder().encode(json));
   }
 
   /** Send raw bytes with chunked framing protocol */
   async sendChunked(data: Uint8Array): Promise<void> {
-    if (!this.cmdChar) throw new Error("Nie połączono z urządzeniem.");
+    if (!this.cmdChar) throw new Error(tr("err.notConnected"));
     // Max payload per write = MTU - 3 (ATT header) - 1 (framing byte)
     const maxPayload = Math.max(20, this.negotiatedMtu - 4);
     let offset = 0;

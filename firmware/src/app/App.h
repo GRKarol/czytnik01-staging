@@ -1128,6 +1128,9 @@ class App {
   void applyUiOrientation(BoardConfig::UiOrientation orientation);
   void applyReaderUiOrientation();
   void reloadRuntimePreferences(uint32_t nowMs, bool rerender);
+  void refreshLibraryFromCompanion(uint32_t nowMs);
+  void applyCompanionChanges(uint32_t nowMs);
+  void syncBluetoothWithSetting();
   BoardConfig::UiOrientation readerUiOrientation() const;
   bool uiRotated180() const;
   uint8_t effectiveAnchorPercent() const;
@@ -1204,6 +1207,16 @@ class App {
   // kroku kreatora" zamiast "wróć do Ustawień/TypographyTuning/Biblioteki".
   bool wifiFlowFromWizard_ = false;
   bool wizardFontPickerActive_ = false;
+  // Set once the wizard's pairing step starts the phone network: from there
+  // the network (and Bluetooth) stay up, no 30 s timeout, until power-off.
+  bool firstSessionSyncHold_ = false;
+  // Changes from the app over the auto-sync network, waiting for the book
+  // to stop playing (applyCompanionChanges).
+  bool companionSettingsPending_ = false;
+  bool companionChangesPending_ = false;
+  // The RSVP preview was opened from the reading-font page, not the
+  // reading-mode one: Wybieram and Back return there.
+  bool welcomePreviewFromFont_ = false;
   bool wizardBookPickerActive_ = false;
   uint32_t welcomeScreenEnteredMs_ = 0;
   enum class WelcomeSdState : uint8_t { Missing, Unreadable, ConfirmFormat, Formatting, Failed };

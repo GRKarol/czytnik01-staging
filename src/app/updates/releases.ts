@@ -1,6 +1,7 @@
 import { CapacitorHttp } from "@capacitor/core";
 import { OTA_RELEASES_API } from "../../shared/config";
 import { isNativeApp, withInternet } from "../device/network-pin";
+import { tr } from "../i18n/index";
 
 export interface ReleaseAsset {
   name: string;
@@ -50,7 +51,7 @@ export async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
   );
   if (res.status === 404) return null;
   if (!res.ok) {
-    throw new Error(`GitHub API zwrócił ${res.status}. Sprawdź połączenie.`);
+    throw new Error(tr("err.github", { status: res.status }));
   }
   const data = (await res.json()) as GhRelease;
   return toReleaseInfo(data);
@@ -115,7 +116,7 @@ async function readAsset(
       readTimeout: 60_000,
     });
     if (res.status < 200 || res.status >= 300) {
-      throw new Error(`Nie udało się pobrać ${asset.name}: HTTP ${res.status}.`);
+      throw new Error(tr("err.assetDownload", { name: asset.name, status: res.status }));
     }
     const bytes = base64ToBytes(String(res.data));
     onProgress?.(bytes.byteLength, bytes.byteLength);
@@ -124,7 +125,7 @@ async function readAsset(
 
   const res = await fetch(asset.downloadUrl);
   if (!res.ok || !res.body) {
-    throw new Error(`Nie udało się pobrać ${asset.name}: HTTP ${res.status}.`);
+    throw new Error(tr("err.assetDownload", { name: asset.name, status: res.status }));
   }
   if (!onProgress) return res.blob();
 

@@ -1,4 +1,5 @@
 import { LitElement, css, html } from "lit";
+import { tr } from "../i18n/index";
 import { customElement, state } from "lit/decorators.js";
 import jsQR from "jsqr";
 
@@ -29,21 +30,20 @@ export class QrScanner extends LitElement {
 
   render() {
     return html`
-      <div class="overlay" role="dialog" aria-modal="true" aria-label="Skaner kodu QR">
+      <div class="overlay" role="dialog" aria-modal="true" aria-label="QR">
         <video playsinline muted></video>
         <div class="frame"></div>
         <p class="hint">
-          ${this.problem ||
-          "Nakieruj aparat na kod QR na ekranie czytnika (Urządzenie → Aplikacja)."}
+          ${this.problem || tr("qr.aim")}
         </p>
-        <button class="close" @click=${this.cancel}>Anuluj</button>
+        <button class="close" @click=${this.cancel}>${tr("common.cancel")}</button>
       </div>
     `;
   }
 
   private async start() {
     if (!navigator.mediaDevices?.getUserMedia) {
-      this.problem = "Ten telefon nie daje aplikacji dostępu do aparatu.";
+      this.problem = tr("qr.noCamera");
       return;
     }
     try {
@@ -52,8 +52,7 @@ export class QrScanner extends LitElement {
         audio: false,
       });
     } catch {
-      this.problem =
-        "Brak dostępu do aparatu. Zezwól aplikacji Flower na aparat w ustawieniach telefonu.";
+      this.problem = tr("qr.denied");
       return;
     }
     await this.updateComplete;

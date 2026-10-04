@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import { extractEventsFromElement } from "./text-formats";
 import type { BookEvent, ParsedBook } from "./rsvp";
+import { tr } from "../i18n/index";
 
 /**
  * Port `firmware/tools/epub_to_rsvp.py` na TypeScript:
@@ -15,7 +16,7 @@ export async function parseEpub(file: File): Promise<ParsedBook> {
   const containerXml = await readZipText(zip, "META-INF/container.xml");
   const opfPath = findRootfilePath(containerXml);
   if (!opfPath) {
-    throw new Error("EPUB nie zawiera ścieżki do pliku OPF (uszkodzony plik?).");
+    throw new Error(tr("err.conv.epubOpf"));
   }
 
   const opfXml = await readZipText(zip, opfPath);
@@ -51,7 +52,7 @@ export async function parseEpub(file: File): Promise<ParsedBook> {
   }
 
   if (!spinePaths.length) {
-    throw new Error("EPUB nie zawiera czytalnych dokumentów XHTML.");
+    throw new Error(tr("err.conv.epubEmpty"));
   }
 
   // The book's own table of contents is the chapter list; headings inside

@@ -24,8 +24,9 @@ import type {
 } from "./api";
 import { DEFAULT_SETTINGS } from "./api";
 import { BluetoothLink } from "./bluetooth-link";
+import { tr } from "../i18n/index";
 
-const BLE_UNSUPPORTED = "Ta funkcja nie jest jeszcze wspierana przez Bluetooth. Połącz się przez WiFi.";
+const bleUnsupported = () => tr("err.bleUnsupported");
 
 const UPLOAD_CHUNK_SIZE = 8192; // 8KB raw bytes per chunk (becomes ~11KB base64)
 
@@ -42,7 +43,7 @@ export class BleDeviceApi implements DeviceApi {
     return new Promise<DeviceEvent>((resolve, reject) => {
       const timeout = setTimeout(() => {
         unsub();
-        reject(new Error("Urządzenie nie odpowiedziało w ciągu 10s."));
+        reject(new Error(tr("err.bleTimeout")));
       }, 10000);
 
       const unsub = this.link.onEvent((ev) => {
@@ -79,7 +80,7 @@ export class BleDeviceApi implements DeviceApi {
         category: b.category === "article" ? "article" : "book",
       }));
     }
-    throw new Error("Nie udało się pobrać listy książek.");
+    throw new Error(tr("err.bleBooks"));
   }
 
   async uploadBook(file: Blob, name: string): Promise<void> {
@@ -121,7 +122,7 @@ export class BleDeviceApi implements DeviceApi {
 
   async deleteBook(_name: string): Promise<void> {
     // Not implemented via BLE yet — would need firmware support
-    throw new Error("Usuwanie książek przez BLE nie jest jeszcze wspierane. Użyj ekranu czytnika.");
+    throw new Error(tr("err.bleUnsupported"));
   }
 
   async getSettings(): Promise<DeviceSettings> {
@@ -141,72 +142,72 @@ export class BleDeviceApi implements DeviceApi {
   }
 
   async installOta(): Promise<void> {
-    throw new Error("OTA przez BLE nie jest wspierane. Użyj WiFi.");
+    throw new Error(tr("err.bleUnsupported"));
   }
 
   async getWifiStation(): Promise<WifiStationConfig> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async setWifiStation(): Promise<WifiStationConfig> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async clearWifiStation(): Promise<WifiStationConfig> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async getRssFeeds(): Promise<string[]> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async setRssFeeds(): Promise<string[]> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async getPlugins(): Promise<PluginInfo[]> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async setWifiTimeoutSeconds(): Promise<number> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async getCapabilities(): Promise<DeviceCapabilities> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async getDeviceInfo(): Promise<DeviceInfo> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async getLogTail(): Promise<DeviceLogTail> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async clearLog(): Promise<void> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async getBookPosition(): Promise<BookPosition> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async setBookPosition(): Promise<BookPosition> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   // Covers and the chapter editor move too much data for BLE: WiFi only.
   async getBookText(): Promise<BookTextPage> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async setBookChapters(): Promise<void> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async resetBookChapters(): Promise<void> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async getBookPicture(): Promise<Blob | null> {
@@ -214,11 +215,11 @@ export class BleDeviceApi implements DeviceApi {
   }
 
   async uploadBookPicture(): Promise<void> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 
   async deleteBookPicture(): Promise<void> {
-    throw new Error(BLE_UNSUPPORTED);
+    throw new Error(bleUnsupported());
   }
 }
 

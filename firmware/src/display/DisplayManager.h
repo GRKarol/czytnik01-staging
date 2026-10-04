@@ -290,6 +290,9 @@ class DisplayManager {
   static uint8_t nanoPaletteCount();
   // English/brand name; App localizes the few that aren't proper names.
   static const char *nanoPaletteName(uint8_t palette);
+  // Background, foreground and accent of a fixed palette (for the Flower
+  // app's swatches); false for Classic, which follows the reading theme.
+  static bool nanoPaletteSwatch(uint8_t palette, uint16_t &background, uint16_t &foreground, uint16_t &accent);
   void setNanoPalette(uint8_t palette, bool ownAccent);
   uint8_t nanoPalette() const { return nanoPalette_; }
   bool nanoOwnAccent() const { return nanoOwnAccent_; }

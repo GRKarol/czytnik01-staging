@@ -1391,6 +1391,7 @@ void App::update(uint32_t nowMs) {
   // or enters CompanionSync state from menu (which takes over).
   if (autoSyncActive_ && state_ != AppState::CompanionSync) {
     companionSync_.update();
+    applyCompanionChanges(nowMs);
     const uint8_t clients = WiFi.softAPgetStationNum();
     if (clients > 0 && !autoSyncClientConnected_) {
       autoSyncClientConnected_ = true;
@@ -1408,7 +1409,7 @@ void App::update(uint32_t nowMs) {
     if (state_ == AppState::Menu && menuScreen_ == MenuScreen::WelcomeAppPairing) {
       autoSyncStartedMs_ = nowMs;
     }
-    if (!autoSyncClientConnected_ && (nowMs - autoSyncStartedMs_ >= 30000)) {
+    if (!autoSyncClientConnected_ && !firstSessionSyncHold_ && (nowMs - autoSyncStartedMs_ >= 30000)) {
       Serial.println("[app] auto-sync: 30s timeout, no client — shutting down AP");
       companionSync_.end();
       autoSyncActive_ = false;
@@ -5377,9 +5378,11 @@ void App::scanWifiNetworks() {
   const int networkCount = WiFi.scanNetworks(false, true);
   wifiNetworks_.clear();
   wifiNetworkMenuItems_.clear();
+  // In the wizard the first row searches again instead of skipping: without
+  // Wi-Fi the reader gets no typefaces, books or update.
   wifiNetworkMenuItems_.push_back(
-      {wifiFlowFromWizard_ ? tr2(TrKey2::SkipForNow) : uiText(UiText::Back),
-       wifiFlowFromWizard_ ? tr3(TrKey3::WifiSkipHint) : ""});
+      {wifiFlowFromWizard_ ? tr4(TrKey4::WizWifiRescan) : uiText(UiText::Back),
+       wifiFlowFromWizard_ ? tr4(TrKey4::WizWifiRescanHint) : ""});
 
   if (networkCount > 0) {
     for (int i = 0; i < networkCount; ++i) {
@@ -5401,6 +5404,15 @@ void App::scanWifiNetworks() {
   WiFi.mode(WIFI_OFF);
 
   if (wifiNetworks_.empty()) {
+    if (wifiFlowFromWizard_) {
+      // Nothing to skip to: the list keeps only "search again".
+      renderWizardBusy(tr2(TrKey2::NoNetworksFound), tr4(TrKey4::WizWifiNoneSub));
+      delay(1800);
+      wifiNetworkSelectedIndex_ = kWifiNetworksBackIndex;
+      menuScreen_ = MenuScreen::WifiNetworks;
+      renderWifiNetworks();
+      return;
+    }
     renderWifiStatus(tr2(TrKey2::NoNetworksFound), "");
     delay(1200);
     returnFromWifiFlow(millis());
@@ -5448,12 +5460,20 @@ void App::selectWifiNetworkItem(uint32_t nowMs) {
   (void)nowMs;
 
   if (wifiNetworkSelectedIndex_ == kWifiNetworksBackIndex || wifiNetworkMenuItems_.size() <= 1) {
+    if (wifiFlowFromWizard_) {
+      scanWifiNetworks();
+      return;
+    }
     returnFromWifiFlow(nowMs);
     return;
   }
 
   const size_t networkIndex = wifiNetworkSelectedIndex_ - kWifiNetworksFirstItemIndex;
   if (networkIndex >= wifiNetworks_.size()) {
+    if (wifiFlowFromWizard_) {
+      renderWifiNetworks();
+      return;
+    }
     returnFromWifiFlow(nowMs);
     return;
   }
@@ -5492,7 +5512,12 @@ void App::selectWifiNetworkItem(uint32_t nowMs) {
 
   preferences_.putString(kPrefWifiSsid, network.ssid);
   preferences_.putString(kPrefWifiPass, "");
-  attemptWifiConnection(network.ssid, "", nowMs);
+  const bool connected = attemptWifiConnection(network.ssid, "", nowMs);
+  if (!connected && wifiFlowFromWizard_) {
+    // The wizard goes on only with a working network: back to the list.
+    renderWifiNetworks();
+    return;
+  }
   returnFromWifiFlow(nowMs);
 }
 
@@ -7058,6 +7083,7 @@ void App::openWelcomeAppPairing(uint32_t nowMs) {
   // (fallback text branch) with nothing left to repaint it afterwards,
   // since the client-connected redraw in App::update() never fires without
   // a QR to scan in the first place.
+  firstSessionSyncHold_ = true;
   if (!autoSyncActive_ && !companionSync_.active()) {
     CompanionSyncManager::Config syncConfig;
     syncConfig.wifiSsid = "";
@@ -7066,7 +7092,7 @@ void App::openWelcomeAppPairing(uint32_t nowMs) {
       autoSyncActive_ = true;
       autoSyncStartedMs_ = millis();
       autoSyncClientConnected_ = false;
-      Serial.println("[welcome] started AP for phone pairing");
+      Serial.println("[welcome] started AP for phone pairing, up until power-off");
     }
   }
   if (!ble_.isActive()) {
@@ -7153,6 +7179,11 @@ void App::wizardStepBack(uint32_t nowMs) {
       openWelcomeFont(nowMs);
       return;
     case MenuScreen::WelcomeReadingModePreview:
+      if (welcomePreviewFromFont_) {
+        welcomePreviewFromFont_ = false;
+        openWelcomeFont(nowMs);
+        return;
+      }
       openWelcomeReadingMode();
       return;
     case MenuScreen::WelcomeConnect:
@@ -9997,6 +10028,31 @@ void App::exitCompanionSync(uint32_t nowMs) {
   preferences_.end();
   preferences_.begin(kPrefsNamespace, false);
   reloadRuntimePreferences(nowMs, false);
+  // Whatever the app changed is applied here; nothing left for the
+  // auto-sync path in update() to pick up again.
+  companionSync_.consumeSettingsChanged();
+  companionSync_.consumeLibraryChanged();
+  companionChangesPending_ = false;
+  syncBluetoothWithSetting();
+  refreshLibraryFromCompanion(nowMs);
+  menuScreen_ = MenuScreen::Main;
+  setState(AppState::Paused, nowMs);
+}
+
+// Bluetooth switched in the app: on/off now, not at the next boot. The
+// first session keeps it on for the app either way.
+void App::syncBluetoothWithSetting() {
+  const bool wanted = preferences_.getBool(kPrefBleEnabled, false);
+  if (wanted && !ble_.isActive()) {
+    ble_.begin(this);
+    Serial.println("[app] BLE on (set in the app)");
+  } else if (!wanted && ble_.isActive() && !firstSessionSyncHold_) {
+    ble_.stop();
+    Serial.println("[app] BLE off (set in the app)");
+  }
+}
+
+void App::refreshLibraryFromCompanion(uint32_t nowMs) {
   storage_.refreshBooks();
   // Books deleted from the Flower app: their save points go to the hidden
   // trash like after deleting on the reader; returned books get theirs back.
@@ -10024,8 +10080,55 @@ void App::exitCompanionSync(uint32_t nowMs) {
       }
     }
   }
-  menuScreen_ = MenuScreen::Main;
-  setState(AppState::Paused, nowMs);
+}
+
+// The phone network that runs outside the Aplikacja screen (30 s after boot,
+// and the whole first session after the wizard's pairing step): settings and
+// books changed from the app take effect at once instead of after a restart.
+// Held back while a book plays, so reopening it doesn't cut the reading.
+void App::applyCompanionChanges(uint32_t nowMs) {
+  const bool settings = companionSync_.consumeSettingsChanged();
+  const bool library = companionSync_.consumeLibraryChanged();
+  companionSettingsPending_ = companionSettingsPending_ || settings;
+  companionChangesPending_ = companionChangesPending_ || library;
+  if ((!companionSettingsPending_ && !companionChangesPending_) || state_ == AppState::Playing) {
+    return;
+  }
+  if (companionSettingsPending_) {
+    companionSettingsPending_ = false;
+    preferences_.end();
+    preferences_.begin(kPrefsNamespace, false);
+    reloadRuntimePreferences(nowMs, false);
+    Serial.println("[app] settings from the app applied");
+  }
+  syncBluetoothWithSetting();
+  if (companionChangesPending_) {
+    companionChangesPending_ = false;
+    refreshLibraryFromCompanion(nowMs);
+    Serial.println("[app] library changes from the app applied");
+  }
+  if (state_ == AppState::Menu) {
+    if (!wizardNanoScreen()) {
+      switch (menuScreen_) {
+        case MenuScreen::SettingsHome:
+        case MenuScreen::SettingsDisplay:
+        case MenuScreen::SettingsPacing:
+        case MenuScreen::SettingsConnectivity:
+        case MenuScreen::WifiSettings:
+        case MenuScreen::ScreensaverSettings:
+        case MenuScreen::SettingsAbout:
+        case MenuScreen::DeviceHome:
+        case MenuScreen::NanoThemes:
+          rebuildSettingsMenuItems();
+          break;
+        default:
+          break;
+      }
+    }
+    renderMenu();
+  } else if (state_ == AppState::Paused) {
+    renderActiveReader(nowMs);
+  }
 }
 
 void App::returnFromSdCardTool() {

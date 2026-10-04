@@ -115,8 +115,9 @@ size_t App::wizardStepIndex() const {
       return 6;
     case MenuScreen::WelcomeFont:
       return 7;
-    case MenuScreen::WelcomeReadingMode:
     case MenuScreen::WelcomeReadingModePreview:
+      return welcomePreviewFromFont_ ? 7 : 8;
+    case MenuScreen::WelcomeReadingMode:
       return 8;
     case MenuScreen::WelcomeConnect:
       return 9;
@@ -262,6 +263,8 @@ void App::renderWizardPage() {
     case MenuScreen::WelcomeFont: {
       view.title = tr4(TrKey4::WizReadFontTitle);
       view.subtitle = tr4(TrKey4::WizFontSub);
+      view.extraId = kWizardExtra;
+      view.extraLabel = tr4(TrKey4::WizPreview);
       if (fontDownloadInProgress_) {
         view.footer = tr4(TrKey4::WizFontsStillLoading);
       }
@@ -297,6 +300,9 @@ void App::renderWizardPage() {
       view.body = nano::WizardBody::Preview;
       view.nextLabel = tr4(TrKey4::WizPick);
       view.previewMode = welcomeReadingModePreviewMode_;
+      if (welcomePreviewFromFont_) {
+        view.footer = typefaceDisplayName(typographyConfig_.typeface);
+      }
       if (welcomeReadingModePreviewMode_ == 0 && kTypographyPreviewWordCount > 0) {
         const size_t current = welcomeReadingModePreviewWordIndex_ % kTypographyPreviewWordCount;
         view.previewWord = kTypographyPreviewWords[current];
@@ -546,7 +552,12 @@ void App::handleWizardTouchAt(uint16_t x, uint16_t y, uint32_t nowMs) {
   }
   if (hit == kWizardExtra) {
     if (menuScreen_ == MenuScreen::WelcomeReadingMode) {
+      welcomePreviewFromFont_ = false;
       openWelcomeReadingModePreview(static_cast<uint8_t>(settingsSelectedIndex_ == 1 ? 1 : 0));
+    } else if (menuScreen_ == MenuScreen::WelcomeFont) {
+      // The chosen typeface running as RSVP words at the reading size.
+      welcomePreviewFromFont_ = true;
+      openWelcomeReadingModePreview(0);
     } else if (menuScreen_ == MenuScreen::WelcomeSdCard) {
       openWelcomeTheme();
     } else if (menuScreen_ == MenuScreen::WelcomeLibrary) {
@@ -583,6 +594,12 @@ void App::handleWizardTouchAt(uint16_t x, uint16_t y, uint32_t nowMs) {
       selectWelcomeReadingModeItem(nowMs);
       return;
     case MenuScreen::WelcomeReadingModePreview:
+      if (welcomePreviewFromFont_) {
+        // "Wybieram" on the typeface preview: this font, on to the mode.
+        welcomePreviewFromFont_ = false;
+        openWelcomeReadingMode();
+        return;
+      }
       // "Wybieram": the previewed mode is the choice.
       settingsSelectedIndex_ = welcomeReadingModePreviewMode_ == 1 ? 1 : 0;
       selectWelcomeReadingModeItem(nowMs);
@@ -695,15 +712,10 @@ void App::markWelcomeWizardDone() {
   // tut_done every later boot would force it.
   preferences_.putBool(kPrefTutorialDone, true);
   tutorialCompleted_ = true;
-  // The phone network and Bluetooth the pairing step switched on go off
-  // with the wizard: from here the phone connects from Urządzenie >
-  // Aplikacja, as on every later boot. Bluetooth stays if it is switched
-  // on in the settings.
-  stopAutoSyncAccessPoint("wizard done");
-  if (ble_.isActive() && !preferences_.getBool(kPrefBleEnabled, false)) {
-    ble_.stop();
-    Serial.println("[welcome] BLE off again after pairing");
-  }
+  // The phone network and Bluetooth from the pairing step stay up for the
+  // rest of this first session (firstSessionSyncHold_), so the app keeps
+  // working while the new owner looks around. From the next boot the phone
+  // connects from Urządzenie > Aplikacja.
 }
 
 bool App::openStarterBook(uint8_t slot, uint32_t nowMs) {

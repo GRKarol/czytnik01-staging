@@ -8,6 +8,7 @@ import {
   type ReleaseInfo,
 } from "../updates/releases";
 import { deviceApi } from "../device/api";
+import { formatDate, onLangChange, tr } from "../i18n/index";
 import { OTA_RELEASES_REPO } from "../../shared/config";
 import { isNativeApp } from "../device/network-pin";
 import { Directory, Filesystem } from "@capacitor/filesystem";
@@ -33,12 +34,23 @@ export class UpdatesPanel extends LitElement {
   /** Firmware of the connected reader (from /api/hello); empty = unknown. */
   @property({ attribute: false }) currentFw = "";
   private downloaded: Blob | null = null;
+  private unsubLang: (() => void) | null = null;
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    this.unsubLang = onLangChange(() => this.requestUpdate());
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.unsubLang?.();
+  }
 
   render() {
     return html`
       <div class="head">
-        <strong>Aktualizacje firmware</strong>
-        <span class="muted">repo: ${OTA_RELEASES_REPO} · ostatni release</span>
+        <strong>${tr("up.title")}</strong>
+        <span class="muted">${tr("up.source", { repo: OTA_RELEASES_REPO })}</span>
       </div>
 
       ${this.renderStage()}
@@ -49,27 +61,20 @@ export class UpdatesPanel extends LitElement {
     switch (this.stage) {
       case "idle":
         return html`
-          <p class="muted">
-            Sprawdzimy GitHub Releases tego repo i — jeśli będzie nowsza wersja — pobierzemy ją
-            do telefonu. Wysłanie na urządzenie wymaga firmware z endpointem OTA (zrobimy to
-            w fazie 3).
-          </p>
-          <button class="cta" @click=${this.check}>Sprawdź aktualizacje</button>
+          <p class="muted">${tr("up.lead")}</p>
+          <button class="cta" @click=${this.check}>${tr("up.check")}</button>
         `;
       case "checking":
-        return html`<p class="muted">Łączę z GitHubem…</p>`;
+        return html`<p class="muted">${tr("up.checking")}</p>`;
       case "none":
         return html`
-          <p class="muted">
-            Brak opublikowanych releasów. Karol musi najpierw zrobić release na GitHubie
-            (Settings → Releases → Draft a new release) z plikiem .bin.
-          </p>
-          <button class="cta ghost" @click=${this.check}>Sprawdź ponownie</button>
+          <p class="muted">${tr("up.none")}</p>
+          <button class="cta ghost" @click=${this.check}>${tr("up.checkAgain")}</button>
         `;
       case "error":
         return html`
           <p class="error">${this.error}</p>
-          <button class="cta ghost" @click=${this.check}>Spróbuj ponownie</button>
+          <button class="cta ghost" @click=${this.check}>${tr("common.retry")}</button>
         `;
       case "found":
       case "downloading":
@@ -89,33 +94,29 @@ export class UpdatesPanel extends LitElement {
     const newer = this.currentFw ? isNewer(tag, this.currentFw) : true;
     const readerAhead = !!this.currentFw && isNewer(this.currentFw, tag);
     const offerInstall = newer;
-    const date = new Date(r.publishedAt).toLocaleDateString("pl-PL");
+    const date = formatDate(r.publishedAt);
 
     return html`
       <article class="release">
         <header>
           <div>
             <h4>${r.name}</h4>
-            <small>${tag} · ${date}${r.isPrerelease ? " · pre-release" : ""}</small>
+            <small>${tag} · ${date}${r.isPrerelease ? ` · ${tr("up.prerelease")}` : ""}</small>
           </div>
           ${newer
-            ? html`<span class="badge ok">Dostępna</span>`
-            : html`<span class="badge">${readerAhead ? "Starsza" : "Aktualna"}</span>`}
+            ? html`<span class="badge ok">${tr("up.available")}</span>`
+            : html`<span class="badge">${readerAhead ? tr("up.older") : tr("up.current")}</span>`}
         </header>
         ${this.currentFw
           ? html`<p class="muted">
-              Czytnik: ${this.currentFw}.
-              ${readerAhead
-                ? "Ma nowszą wersję niż to wydanie, nie ma czego instalować."
-                : newer
-                  ? ""
-                  : "Ma już tę wersję."}
+              ${tr("up.reader", { v: this.currentFw })}
+              ${readerAhead ? tr("up.readerAhead") : newer ? "" : tr("up.readerSame")}
             </p>`
           : nothing}
 
         ${r.body
           ? html`<pre class="changelog">${trimChangelog(r.body)}</pre>`
-          : html`<p class="muted">Brak opisu wersji.</p>`}
+          : html`<p class="muted">${tr("up.noNotes")}</p>`}
 
         ${asset
           ? html`
@@ -125,35 +126,35 @@ export class UpdatesPanel extends LitElement {
                   ? html`<progress max="100" value=${this.progress}></progress>`
                   : ""}
                 ${this.stage === "downloaded"
-                  ? html`<span class="ok">Pobrano</span>`
+                  ? html`<span class="ok">${tr("up.downloaded")}</span>`
                   : ""}
                 ${this.stage === "installed"
-                  ? html`<span class="ok">Zainstalowano · urządzenie się restartuje</span>`
+                  ? html`<span class="ok">${tr("up.installed")}</span>`
                   : ""}
               </div>
               <div class="row">
                 ${this.stage === "found" && offerInstall
                   ? html`<button class="cta" @click=${() => this.download(asset)}>
-                      Pobierz na telefon
+                      ${tr("up.download")}
                     </button>`
                   : ""}
                 ${this.stage === "downloaded"
                   ? html`<button class="cta" @click=${this.install}>
-                        Wyślij na urządzenie
+                        ${tr("up.install")}
                       </button>
                       <button class="cta ghost" @click=${this.savePhone}>
-                        Zapisz plik na telefonie
+                        ${tr("up.savePhone")}
                       </button>`
                   : ""}
                 ${this.stage === "installing"
-                  ? html`<span class="muted">Wysyłam ${this.progress}%…</span>`
+                  ? html`<span class="muted">${tr("up.sendingPct", { n: this.progress })}</span>`
                   : ""}
               </div>
             `
-          : html`<p class="muted">Brak pliku .bin w tym release.</p>`}
+          : html`<p class="muted">${tr("up.noBin")}</p>`}
 
         <a class="link" href=${r.htmlUrl} target="_blank" rel="noopener noreferrer">
-          Otwórz na GitHubie ↗
+          ${tr("up.github")} ↗
         </a>
       </article>
     `;

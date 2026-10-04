@@ -11,6 +11,7 @@ import {
   parseEvent,
 } from "../../shared/device-protocol";
 import type { DeviceLink, TransportInfo } from "./device-link";
+import { tr } from "../i18n/index";
 
 const BAUD_RATE = 115200;
 
@@ -32,7 +33,7 @@ export class SerialLink implements DeviceLink {
 
   async connect(): Promise<void> {
     if (!SerialLink.isSupported()) {
-      throw new Error("Web Serial nie jest wspierany w tej przeglądarce.");
+      throw new Error(tr("err.webSerial"));
     }
     const port = await navigator.serial.requestPort();
     await port.open({ baudRate: BAUD_RATE });
@@ -58,7 +59,7 @@ export class SerialLink implements DeviceLink {
   }
 
   async send(cmd: DeviceCommand): Promise<void> {
-    if (!this.writer) throw new Error("Nie połączono z urządzeniem.");
+    if (!this.writer) throw new Error(tr("err.notConnected"));
     await this.writer.write(encodeCommand(cmd));
   }
 

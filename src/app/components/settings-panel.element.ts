@@ -1,154 +1,47 @@
-import { LitElement, css, html, nothing, svg } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { LitElement, css, html, nothing, type TemplateResult } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
 import {
   deviceApi,
   onDeviceApiChange,
-  type DeviceSettings,
-  type Theme,
-  type Language,
-  type ReaderHand,
-  type ReaderMode,
-  type PauseBehaviour,
-  type Typeface,
-  type FooterMetric,
-  type BatteryLabel,
-  type WifiStationConfig,
+  FOCUS_COLOR_CUSTOM,
+  TYPEFACE_NAMES,
   type DeviceInfo,
+  type DeviceSettings,
+  type Language,
+  type ReaderDeviceSettings,
+  type Typeface,
+  type WifiStationConfig,
 } from "../device/api";
-import { TYPEFACE_NAMES } from "../device/api";
-import { setLang } from "../i18n/index";
-import { deviceLangToSupported } from "../i18n/lang-map";
+import { HttpDeviceApi } from "../device/http-api";
+import { APP_VERSION } from "../../shared/config";
+import { LANG_NAMES, SUPPORTED_LANGS, chooseLang, chosenLang, tr, type SupportedLang } from "../i18n/index";
+import { icons } from "../ui/icons";
+import { rangeFill, rgb565, sharedStyles } from "../ui/theme";
 import "./help-panel.element";
-import "./setting-tooltip.element";
+import "./updates-panel.element";
 
-const THEME_LABEL: Record<Theme, string> = {
-  light: "Jasny",
-  dark: "Ciemny",
-  night: "Nocny",
-};
-const LANG_LABEL: Record<Language, string> = {
-  pl: "Polski",
-  en: "English",
-  de: "Deutsch",
-  es: "Español",
-  fr: "Français",
-  ro: "Română",
-};
-const HAND_LABEL: Record<ReaderHand, string> = { right: "Prawa", left: "Lewa" };
-const MODE_LABEL: Record<ReaderMode, string> = { rsvp: "RSVP", scroll: "Przewijanie" };
-const PAUSE_LABEL: Record<PauseBehaviour, string> = {
-  tap: "Tap",
-  "long-press": "Przytrzymanie",
-  auto: "Auto",
-};
+type Page = "root" | "reading" | "look" | "display" | "menu" | "power" | "connect" | "updates" | "language" | "help" | "about";
 
-const FONT_SIZE_LABEL: Record<number, string> = {
-  0: "0",
-  1: "1",
-  2: "2",
-  3: "3",
-  4: "4",
-  5: "5",
-  6: "6",
-  7: "7",
-  8: "8",
-};
-
-const LINE_SPACING_LABEL: Record<number, string> = {
-  0: "Compact",
-  1: "Normal",
-  2: "Relaxed",
-};
-
-const MARGIN_LABEL: Record<number, string> = {
-  0: "Narrow",
-  1: "Normal",
-  2: "Wide",
-};
-
-const RSVP_FONT_SIZE_LABEL: Record<number, string> = {
-  0: "S",
-  1: "M",
-  2: "L",
-};
-
-const FOOTER_METRIC_LABEL: Record<FooterMetric, string> = {
-  percentage: "Procent",
-  chapter_time: "Czas rozdziału",
-  book_time: "Czas książki",
-};
-
-const BATTERY_LABEL_LABEL: Record<BatteryLabel, string> = {
-  percent: "Procent",
-  time_remaining: "Czas",
-  voltage: "Napięcie",
-};
-
-type SettingsSubView = "settings" | "help";
-
-const ico = (d: string) => svg`
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d=${d}/>
-  </svg>
-`;
-const icoBook = svg`
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M4 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H4z"/>
-    <path d="M20 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/>
-  </svg>
-`;
-const icoGauge = svg`
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 12l4-4"/>
-    <path d="M3 12a9 9 0 1 1 18 0"/>
-  </svg>
-`;
-const icoType = ico("M5 4h14M12 4v16M9 20h6");
-const icoSun = svg`
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="12" cy="12" r="4"/>
-    <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
-  </svg>
-`;
-const icoActivity = ico("M3 12h4l2 8 4-16 2 8h6");
-const icoGlobe = svg`
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="12" cy="12" r="9"/>
-    <path d="M3 12h18M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/>
-  </svg>
-`;
-const icoCode = ico("M8 5L3 12l5 7M16 5l5 7-5 7");
-const icoWifi = svg`
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M2 8.5a17 17 0 0 1 20 0"/>
-    <path d="M5 12a13 13 0 0 1 14 0"/>
-    <path d="M8.5 15.5a8 8 0 0 1 7 0"/>
-    <circle cx="12" cy="19" r="1.2" fill="currentColor"/>
-  </svg>
-`;
-
-function legend(icon: unknown, text: string) {
-  return html`<span class="legend-ico">${icon}</span><span class="legend-text">${text}</span>`;
-}
-
+/**
+ * Więcej: the reader's settings as category pages, like the reader's own
+ * Ustawienia/Motywy/Urządzenie tabs, plus updates, language and help.
+ * Every change goes to the reader at once (optimistic, rolled back on error).
+ */
 @customElement("settings-panel")
 export class SettingsPanel extends LitElement {
+  /** Firmware the reader reported on connect (for About). */
+  @property({ attribute: false }) readerFirmware = "";
+  @property({ attribute: false }) connection = "";
+
+  @state() private page: Page = "root";
   @state() private settings: DeviceSettings | null = null;
   @state() private saving = false;
   @state() private error = "";
   @state() private tapCount = 0;
   @state() private justUnlocked = false;
-  @state() private subView: SettingsSubView = "settings";
   private tapResetTimer: number | null = null;
   private unsubApi: (() => void) | null = null;
 
-  // ─── Sieć: stacja WiFi + auto-off ────────────────────────────────────────
   @state() private wifi: WifiStationConfig | null = null;
   @state() private wifiSsidInput = "";
   @state() private wifiPasswordInput = "";
@@ -156,25 +49,15 @@ export class SettingsPanel extends LitElement {
   @state() private wifiError = "";
   @state() private wifiTimeoutMinutes = 0;
 
-  // ─── Diagnostyka + logi (developer) ──────────────────────────────────────
   @state() private deviceInfo: DeviceInfo | null = null;
   @state() private logLines: string[] = [];
   @state() private showLogs = false;
   @state() private diagBusy = false;
 
-  private get effectiveMode(): ReaderMode {
-    const m = this.settings?.readerMode;
-    return m === "scroll" ? "scroll" : "rsvp";
-  }
-
   connectedCallback(): void {
     super.connectedCallback();
     void this.load();
-    void this.loadNetwork();
-    this.unsubApi = onDeviceApiChange(() => {
-      void this.load();
-      void this.loadNetwork();
-    });
+    this.unsubApi = onDeviceApiChange(() => void this.load());
   }
 
   disconnectedCallback(): void {
@@ -183,496 +66,528 @@ export class SettingsPanel extends LitElement {
     this.unsubApi?.();
   }
 
+  private get onReader(): boolean {
+    return deviceApi.current instanceof HttpDeviceApi;
+  }
+
+  // ─── Render ──────────────────────────────────────────────────────────────
+
   render() {
-    if (this.subView === "help") {
-      return html`
-        <help-panel
-          @help-close=${this.handleHelpClose}
-          @restart-tutorial=${this.handleRestartTutorial}
-        ></help-panel>
-      `;
+    if (this.page === "help") {
+      return html`<help-panel @help-close=${() => this.go("root")} @restart-tutorial=${this.handleRestartTutorial}></help-panel>`;
     }
-
-    if (!this.settings) {
-      return html`<p class="muted">Wczytuję ustawienia z urządzenia…</p>`;
-    }
-    const s = this.settings;
+    if (!this.settings) return html`<p class="muted">${tr("set.loading")}</p>`;
+    const body = this.renderPage(this.settings);
+    if (this.page === "root") return body;
     return html`
-      <div class="brand" @click=${this.onBrandTap}>
-        <strong>Flower</strong>
-        <span>Ustawienia urządzenia</span>
-        ${this.tapCount > 0 && this.tapCount < 10 && !s.devMode
-          ? html`<small class="tap-hint">${10 - this.tapCount} aby odblokować…</small>`
-          : ""}
-        ${this.justUnlocked
-          ? html`<small class="tap-hint ok">Tryb developera włączony</small>`
-          : ""}
-      </div>
+      <button class="back" @click=${() => this.go("root")}>${icons.chevronLeft()} ${tr("nav.more")}</button>
+      <h2 class="page-title">${this.pageTitle(this.page)}</h2>
+      ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
+      ${body}
+      ${this.saving ? html`<p class="muted small saving">${tr("common.saving")}</p>` : nothing}
+    `;
+  }
 
-      ${this.error ? html`<p class="error">${this.error}</p>` : ""}
+  private go(page: Page): void {
+    this.page = page;
+    this.error = "";
+    document.querySelector("czytnik-app")?.shadowRoot?.querySelector("main")?.scrollTo({ top: 0 });
+    if (page === "connect") void this.loadNetwork();
+  }
 
-      <fieldset class="group">
-        <legend>${legend(icoBook, "Tryb czytania")}</legend>
-        ${this.segmented(
-          "readerMode",
-          s.readerMode,
-          ["rsvp", "scroll"],
-          MODE_LABEL,
-          "Tryb",
-          "readingMode",
-        )}
-      </fieldset>
+  private pageTitle(page: Page): string {
+    const titles: Record<Page, string> = {
+      root: tr("nav.more"),
+      reading: tr("set.reading"),
+      look: tr("set.look"),
+      display: tr("set.display"),
+      menu: tr("set.menu"),
+      power: tr("set.power"),
+      connect: tr("set.connect"),
+      updates: tr("set.updates"),
+      language: tr("set.language"),
+      help: tr("set.help"),
+      about: tr("set.about"),
+    };
+    return titles[page];
+  }
 
-      ${this.effectiveMode === "rsvp"
-        ? html`
-            <fieldset class="group">
-              <legend>${legend(icoGauge, "Ustawienia RSVP")}</legend>
-              ${this.segmented(
-                "pauseBehaviour",
-                s.pauseBehaviour,
-                ["tap", "long-press", "auto"],
-                PAUSE_LABEL,
-                "Pauza",
-                "pauseBehaviour",
-              )}
-              ${this.slider("baseWpm", "Tempo", s.baseWpm, 50, 1000, 25, "WPM", "baseWpm")}
-              ${this.slider(
-                "longWordDelayMs",
-                "Długie słowa",
-                s.longWordDelayMs,
-                0,
-                600,
-                50,
-                "ms",
-                "longWordDelay",
-              )}
-              ${this.slider(
-                "complexWordDelayMs",
-                "Złożone słowa",
-                s.complexWordDelayMs,
-                0,
-                600,
-                50,
-                "ms",
-                "complexWordDelay",
-              )}
-              ${this.slider(
-                "punctuationDelayMs",
-                "Interpunkcja",
-                s.punctuationDelayMs,
-                0,
-                600,
-                50,
-                "ms",
-                "punctuationDelay",
-              )}
-              ${this.toggle("phantomWords", "Słowa widma", s.phantomWords)}
-            </fieldset>
+  private renderPage(s: DeviceSettings): TemplateResult {
+    switch (this.page) {
+      case "root":
+        return this.renderHome(s);
+      case "reading":
+        return this.renderReading(s);
+      case "look":
+        return this.renderLook(s);
+      case "display":
+        return this.renderDisplay(s);
+      case "menu":
+        return this.renderMenu(s);
+      case "power":
+        return this.renderPower(s);
+      case "connect":
+        return this.renderConnect(s);
+      case "updates":
+        return html`<updates-panel .currentFw=${this.readerFirmware}></updates-panel>`;
+      case "language":
+        return this.renderLanguage(s);
+      case "about":
+        return this.renderAbout(s);
+      default:
+        return html``;
+    }
+  }
 
-            <fieldset class="group">
-              <legend>${legend(icoType, "Typografia RSVP")}</legend>
-              ${this.segmented(
-                "fontSizeIndex",
-                s.fontSizeIndex,
-                [0, 1, 2],
-                RSVP_FONT_SIZE_LABEL,
-                "Rozmiar czcionki",
-              )}
-              <label class="select">
-                <span>Krój czcionki</span>
-                <select
-                  @change=${(e: Event) => {
-                    const index = Number((e.target as HTMLSelectElement).value);
-                    const legacy = (["standard", "open_dyslexic", "atkinson"] as Typeface[])[index];
-                    this.put(legacy ? { typefaceIndex: index, typeface: legacy } : { typefaceIndex: index });
-                  }}
-                >
-                  ${TYPEFACE_NAMES.map((name, index) =>
-                    offeredTypeface(s, index)
-                      ? html`<option value=${index} ?selected=${index === s.typefaceIndex}>${name}</option>`
-                      : nothing,
-                  )}
-                  ${s.typefaceIndex >= TYPEFACE_NAMES.length
-                    ? html`<option value=${s.typefaceIndex} selected>Krój z nowszego firmware'u</option>`
-                    : nothing}
-                </select>
-                <small class="muted small">
-                  ${s.typefacesAvailable
-                    ? `Czytnik ma teraz ${s.typefacesAvailable.length} z ${TYPEFACE_NAMES.length} krojów. Resztę
-                      pobiera sam na kartę SD, gdy połączy się z domowym Wi-Fi.`
-                    : "Kroje od Literaty w dół czytnik wczytuje z karty SD. Bez paczki czcionek na karcie użyje Atkinsona."}
-                </small>
-              </label>
-              ${this.toggle("focusHighlight", "Podświetlenie fokusowe", s.focusHighlight)}
-              ${this.slider("tracking", "Tracking (odstępy)", s.tracking, -2, 3, 1, "")}
-              ${this.slider("anchorPercent", "Pozycja kotwicy", s.anchorPercent, 30, 40, 1, "%")}
-              ${this.slider("guideWidth", "Szerokość prowadnicy", s.guideWidth, 12, 30, 1, "px")}
-              ${this.slider("guideGap", "Przerwa prowadnicy", s.guideGap, 2, 8, 1, "px")}
-            </fieldset>
-          `
-        : html`
-            <fieldset class="group">
-              <legend>${legend(icoType, "Ustawienia Scroll")}</legend>
-              ${this.segmented(
-                "scrollFontSize",
-                s.scrollFontSize,
-                [0, 1, 2, 3, 4, 5, 6, 7, 8],
-                FONT_SIZE_LABEL,
-                "Rozmiar czcionki",
-              )}
-              ${this.segmented(
-                "scrollLineSpacing",
-                s.scrollLineSpacing,
-                [0, 1, 2],
-                LINE_SPACING_LABEL,
-                "Interlinia",
-              )}
-              ${this.segmented(
-                "scrollMargin",
-                s.scrollMargin,
-                [0, 1, 2],
-                MARGIN_LABEL,
-                "Marginesy",
-              )}
-            </fieldset>
-          `}
-
-      <fieldset class="group">
-        <legend>${legend(icoSun, "Wyświetlanie")}</legend>
-        ${this.segmented(
-          "theme",
-          s.theme,
-          ["light", "dark", "night"],
-          THEME_LABEL,
-          undefined,
-          "theme",
-        )}
-        ${this.slider("brightness", "Jasność", Math.max(10, s.brightness), 10, 100, 1, "%", "brightness")}
-        ${this.segmented(
-          "readerHand",
-          s.readerHand,
-          ["right", "left"],
-          HAND_LABEL,
-          "Dłoń",
-          "readerHand",
-        )}
-      </fieldset>
-
-      <fieldset class="group">
-        <legend>${legend(icoActivity, "HUD podczas czytania")}</legend>
-        ${this.toggle(
-          "showBatteryWhileReading",
-          "Bateria",
-          s.showBatteryWhileReading,
-          "readingBattery",
-        )}
-        ${this.toggle(
-          "showChapterWhileReading",
-          "Rozdział",
-          s.showChapterWhileReading,
-          "readingChapter",
-        )}
-        ${this.toggle(
-          "showPercentWhileReading",
-          "Procent",
-          s.showPercentWhileReading,
-          "readingPercent",
-        )}
-        ${this.segmented(
-          "footerMetric",
-          s.footerMetric,
-          ["percentage", "chapter_time", "book_time"],
-          FOOTER_METRIC_LABEL,
-          "Metryka stopki",
-        )}
-        ${this.segmented(
-          "batteryLabel",
-          s.batteryLabel,
-          ["percent", "time_remaining", "voltage"],
-          BATTERY_LABEL_LABEL,
-          "Etykieta baterii",
-        )}
-      </fieldset>
-
-      <fieldset class="group">
-        <legend>${legend(icoGlobe, "Język")}</legend>
-        <label class="select">
-          <span>Język interfejsu</span>
-          <select
-            @change=${(e: Event) =>
-              this.put({ language: (e.target as HTMLSelectElement).value as Language })}
-          >
-            ${(Object.keys(LANG_LABEL) as Language[]).map(
-              (l) =>
-                html`<option value=${l} ?selected=${l === s.language}>${LANG_LABEL[l]}</option>`,
-            )}
-          </select>
-        </label>
-      </fieldset>
-
-      <fieldset class="group">
-        <legend>${legend(icoWifi, "Sieć")}</legend>
-        <p class="muted small">
-          Podłącz czytnik do domowego WiFi — nie będzie już wymagał trybu AP, żeby zsynchronizować
-          się z internetem (aktualizacje, RSS).
-        </p>
-        ${this.wifi?.configured
-          ? html`<p class="muted small">
-              Zapisana sieć: <strong>${this.wifi.ssid}</strong>${this.wifi.passwordSet
-                ? " (z hasłem)"
-                : " (bez hasła)"}
-            </p>`
-          : html`<p class="muted small">Czytnik nie ma jeszcze zapisanej sieci domowej.</p>`}
-        <label class="select">
-          <span>SSID</span>
-          <input
-            type="text"
-            .value=${this.wifiSsidInput}
-            placeholder="Nazwa sieci WiFi"
-            @input=${(e: Event) => (this.wifiSsidInput = (e.target as HTMLInputElement).value)}
-          />
-        </label>
-        <label class="select">
-          <span>Hasło</span>
-          <input
-            type="password"
-            .value=${this.wifiPasswordInput}
-            placeholder=${this.wifi?.passwordSet ? "•••••••• (zostaw puste bez zmian)" : "Hasło"}
-            @input=${(e: Event) =>
-              (this.wifiPasswordInput = (e.target as HTMLInputElement).value)}
-          />
-        </label>
-        ${this.wifiError ? html`<p class="error">${this.wifiError}</p>` : ""}
-        <div class="wifi-actions">
-          <button class="mini-cta" ?disabled=${this.wifiBusy} @click=${this.saveWifiStation}>
-            Zapisz sieć
-          </button>
-          <button
-            class="mini-cta ghost"
-            ?disabled=${this.wifiBusy || !this.wifi?.configured}
-            @click=${this.forgetWifiStation}
-          >
-            Zapomnij
-          </button>
-        </div>
-        <label class="slider">
-          <span
-            >Auto-wyłączenie WiFi/AP<small
-              >${this.wifiTimeoutMinutes === 0 ? "nigdy" : `${this.wifiTimeoutMinutes} min`}</small
-            ></span
-          >
-          <input
-            type="range"
-            min="0"
-            max="60"
-            step="5"
-            .value=${String(this.wifiTimeoutMinutes)}
-            @change=${(e: Event) =>
-              this.setWifiTimeoutMinutes(Number((e.target as HTMLInputElement).value))}
-          />
-        </label>
-      </fieldset>
-
-      ${s.devMode
-        ? html`
-            <fieldset class="group dev">
-              <legend>${legend(icoCode, "Developer")}</legend>
-              <p class="muted small">
-                Te opcje są ukryte przed klientem. Włączasz je tylko z aplikacji — na samym
-                urządzeniu też nic nie widzi, dopóki tu jest „On".
-              </p>
-              ${this.toggle("devMode", "Tryb developera", s.devMode)}
-              <p class="muted small">
-                Po wyłączeniu trybu developera advanced ustawienia (OTA owner, Auto OTA, RSS feed
-                editor, etc.) znikają zarówno z urządzenia jak i z tej aplikacji.
-              </p>
-
-              <div class="dev-block">
-                <div class="dev-block-head">
-                  <strong>Diagnostyka urządzenia</strong>
-                  <button class="mini-cta ghost" ?disabled=${this.diagBusy} @click=${this.refreshDiagnostics}>
-                    Odśwież
-                  </button>
-                </div>
-                ${this.deviceInfo
-                  ? html`
-                      <ul class="diag-list">
-                        <li><span>Firmware</span><strong>${this.deviceInfo.firmwareVersion}</strong></li>
-                        <li><span>Tryb sieci</span><strong>${this.deviceInfo.mode === "station" ? "Stacja WiFi" : "Access Point"}</strong></li>
-                        <li><span>SSID</span><strong>${this.deviceInfo.networkSsid || "—"}</strong></li>
-                        <li><span>Bateria</span><strong>${this.deviceInfo.batteryPercent}%</strong></li>
-                        <li>
-                          <span>Karta SD</span>
-                          <strong
-                            >${formatKb(this.deviceInfo.sdFreeKb)} wolne /
-                            ${formatKb(this.deviceInfo.sdTotalKb)}</strong
-                          >
-                        </li>
-                      </ul>
-                    `
-                  : html`<p class="muted small">Kliknij „Odśwież", żeby pobrać stan z urządzenia.</p>`}
-              </div>
-
-              <div class="dev-block">
-                <div class="dev-block-head">
-                  <strong>Logi urządzenia</strong>
-                  <button class="mini-cta ghost" @click=${this.toggleLogs}>
-                    ${this.showLogs ? "Ukryj" : "Pokaż"}
-                  </button>
-                </div>
-                ${this.showLogs
-                  ? html`
-                      <div class="log-actions">
-                        <button class="mini-cta ghost" ?disabled=${this.diagBusy} @click=${this.refreshLogs}>
-                          Odśwież
-                        </button>
-                        <button class="mini-cta ghost" ?disabled=${this.diagBusy} @click=${this.clearLogs}>
-                          Wyczyść
-                        </button>
-                      </div>
-                      <pre class="log-view">${this.logLines.length
-                        ? this.logLines.join("\n")
-                        : "(pusto)"}</pre>
-                    `
-                  : ""}
-              </div>
-            </fieldset>
-          `
-        : ""}
-
-      <button class="help-link" @click=${this.openHelp}>
-        <svg
-          width="20"
-          height="20"
-          viewBox="0 0 20 20"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="10" cy="10" r="8" />
-          <path d="M7.5 7.5a2.5 2.5 0 0 1 4.5 1.5c0 1.5-2 2-2 3" />
-          <circle cx="10" cy="14.5" r="0.5" fill="currentColor" />
-        </svg>
-        <span>Pomoc / Przewodnik</span>
+  private renderHome(s: DeviceSettings) {
+    const row = (page: Page, icon: TemplateResult, title: string, desc?: string) => html`
+      <button class="item" @click=${() => this.go(page)}>
+        <span class="row-ico">${icon}</span>
+        <span class="label">${title}${desc ? html`<small>${desc}</small>` : nothing}</span>
+        <span class="chev">${icons.chevronRight()}</span>
       </button>
-
-      ${this.saving ? html`<p class="muted small">Zapisuję…</p>` : ""}
+    `;
+    return html`
+      ${!this.onReader ? html`<p class="notice">${tr("set.sample")}</p>` : nothing}
+      ${this.onReader && !s.device ? html`<p class="notice">${tr("set.needsUpdate")}</p>` : nothing}
+      ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
+      <span class="section-title">${tr("set.group.reader")}</span>
+      <div class="list">
+        ${row("reading", icons.gauge(), tr("set.reading"), tr("set.reading.desc"))}
+        ${row("look", icons.type(), tr("set.look"), tr("set.look.desc"))}
+        ${row("display", icons.sun(), tr("set.display"), tr("set.display.desc"))}
+        ${s.device ? row("menu", icons.palette(), tr("set.menu"), tr("set.menu.desc")) : nothing}
+        ${s.device ? row("power", icons.moon(), tr("set.power"), tr("set.power.desc")) : nothing}
+        ${row("connect", icons.wifi(20), tr("set.connect"), tr("set.connect.desc"))}
+        ${row("updates", icons.update(20), tr("set.updates"), tr("set.updates.desc"))}
+      </div>
+      <span class="section-title">${tr("set.group.app")}</span>
+      <div class="list">
+        ${row("language", icons.globe(), tr("set.language"), LANG_NAMES[chosenLang() ?? (s.language as SupportedLang)] ?? "")}
+        ${row("help", icons.help(), tr("set.help"))}
+        ${row("about", icons.chip(), tr("set.about"), `${tr("set.appVersion")} ${APP_VERSION}`)}
+      </div>
     `;
   }
 
-  // ─── help-panel navigation ────────────────────────────────────────────────
+  // ─── Reading ─────────────────────────────────────────────────────────────
 
-  private openHelp(): void {
-    this.subView = "help";
-  }
-
-  private handleHelpClose(): void {
-    this.subView = "settings";
-  }
-
-  private handleRestartTutorial(): void {
-    this.subView = "settings";
-    this.dispatchEvent(new CustomEvent("restart-tutorial", { bubbles: true, composed: true }));
-  }
-
-  // ─── helpers UI ───────────────────────────────────────────────────────────
-
-  private toggle(key: keyof DeviceSettings, label: string, value: boolean, tooltipKey?: string) {
+  private renderReading(s: DeviceSettings) {
+    const rsvp = s.readerMode !== "scroll";
     return html`
-      <label class="toggle">
-        <span class="label-with-tooltip"
-          >${label}${tooltipKey
-            ? html`<setting-tooltip settingKey=${tooltipKey}></setting-tooltip>`
-            : ""}</span
-        >
-        <input
-          type="checkbox"
-          ?checked=${value}
-          @change=${(e: Event) =>
-            this.put({ [key]: (e.target as HTMLInputElement).checked } as Partial<DeviceSettings>)}
-        />
-      </label>
+      <div class="list">
+        ${this.segRow(tr("set.mode"), s.readerMode, [
+          ["rsvp", tr("set.mode.rsvp")],
+          ["scroll", tr("set.mode.scroll")],
+        ], (v) => this.put({ readerMode: v }))}
+        ${rsvp
+          ? html`
+              ${this.sliderRow(tr("set.wpm"), s.baseWpm, 50, 1000, 25, (v) => `${v} ${tr("set.wpm.unit")}`, (v) => this.put({ baseWpm: v }))}
+              ${this.segRow(tr("set.pause"), s.pauseBehaviour === "auto" ? "auto" : "tap", [
+                ["tap", tr("set.pause.sentence")],
+                ["auto", tr("set.pause.instant")],
+              ], (v) => this.put({ pauseBehaviour: v }))}
+              ${this.switchRow(tr("set.phantom"), s.phantomWords, (v) => this.put({ phantomWords: v }), tr("set.phantom.desc"))}
+            `
+          : html`
+              ${this.sliderRow(tr("set.scrollSize"), s.scrollFontSize, 0, 8, 1, (v) => String(v + 1), (v) => this.put({ scrollFontSize: v }))}
+              ${this.segRow(tr("set.lineSpacing"), s.scrollLineSpacing, [
+                [0, tr("set.compact")],
+                [1, tr("set.normal")],
+                [2, tr("set.relaxed")],
+              ], (v) => this.put({ scrollLineSpacing: v }))}
+              ${this.segRow(tr("set.margins"), s.scrollMargin, [
+                [0, tr("set.narrow")],
+                [1, tr("set.normal")],
+                [2, tr("set.wide")],
+              ], (v) => this.put({ scrollMargin: v }))}
+            `}
+      </div>
+      ${rsvp
+        ? html`
+            <span class="section-title">${tr("set.delays")}</span>
+            <div class="list">
+              ${this.sliderRow(tr("set.longWords"), s.longWordDelayMs, 0, 600, 50, (v) => `+${v} ms`, (v) => this.put({ longWordDelayMs: v }))}
+              ${this.sliderRow(tr("set.complexWords"), s.complexWordDelayMs, 0, 600, 50, (v) => `+${v} ms`, (v) => this.put({ complexWordDelayMs: v }))}
+              ${this.sliderRow(tr("set.punctuation"), s.punctuationDelayMs, 0, 600, 50, (v) => `+${v} ms`, (v) => this.put({ punctuationDelayMs: v }))}
+            </div>
+          `
+        : nothing}
     `;
   }
 
-  private slider(
-    key: keyof DeviceSettings,
-    label: string,
-    value: number,
-    min: number,
-    max: number,
-    step: number,
-    unit: string,
-    tooltipKey?: string,
-  ) {
+  // ─── Reading look ────────────────────────────────────────────────────────
+
+  private renderLook(s: DeviceSettings) {
+    const d = s.device;
+    const o = s.options;
+    const focusCss =
+      d && o
+        ? rgb565(d.focusColor === FOCUS_COLOR_CUSTOM ? d.focusRgb : (o.focusColors[d.focusColor] ?? 0x001f))
+        : "var(--accent)";
+    const available = s.typefacesAvailable;
     return html`
-      <label class="slider">
-        <span
-          >${label}${tooltipKey
-            ? html`<setting-tooltip settingKey=${tooltipKey}></setting-tooltip>`
-            : ""}<small>${value} ${unit}</small></span
-        >
-        <input
-          type="range"
-          min=${min}
-          max=${max}
-          step=${step}
-          .value=${String(value)}
-          @input=${(e: Event) =>
-            this.put({
-              [key]: Number((e.target as HTMLInputElement).value),
-            } as Partial<DeviceSettings>)}
-        />
-      </label>
+      ${this.renderSample(s, focusCss)}
+      <div class="list">
+        <label class="item stack">
+          <span class="head"><span>${tr("set.typeface")}</span></span>
+          <select
+            class="input"
+            @change=${(e: Event) => {
+              const index = Number((e.target as HTMLSelectElement).value);
+              const legacy = (["standard", "open_dyslexic", "atkinson"] as Typeface[])[index];
+              this.put(legacy ? { typefaceIndex: index, typeface: legacy } : { typefaceIndex: index });
+            }}
+          >
+            ${TYPEFACE_NAMES.map((name, index) =>
+              !available || available.includes(index) || index === s.typefaceIndex
+                ? html`<option value=${index} ?selected=${index === s.typefaceIndex}>${name}</option>`
+                : nothing,
+            )}
+            ${s.typefaceIndex >= TYPEFACE_NAMES.length
+              ? html`<option value=${s.typefaceIndex} selected>${tr("set.typeface.newer")}</option>`
+              : nothing}
+          </select>
+          ${available && available.length < TYPEFACE_NAMES.length
+            ? html`<small class="muted small">${tr("set.typeface.sd", { have: available.length, all: TYPEFACE_NAMES.length })}</small>`
+            : nothing}
+        </label>
+        ${this.segRow(tr("set.wordSize"), s.fontSizeIndex, [
+          [0, "S"],
+          [1, "M"],
+          [2, "L"],
+        ], (v) => this.put({ fontSizeIndex: v }))}
+        ${this.switchRow(tr("set.focusHighlight"), s.focusHighlight, (v) => this.put({ focusHighlight: v }), tr("set.focusHighlight.desc"))}
+        ${d && o
+          ? html`<div class="item stack">
+              <span class="head"><span>${tr("set.focusColor")}</span></span>
+              <div class="swatches">
+                ${o.focusColors.map(
+                  (c, i) => html`<button
+                    class=${d.focusColor === i ? "swatch on" : "swatch"}
+                    style="background:${rgb565(c)}"
+                    aria-label=${tr("set.focusColor")}
+                    @click=${() => this.putDevice({ focusColor: i })}
+                  >${d.focusColor === i ? icons.check(18) : nothing}</button>`,
+                )}
+                ${d.focusColor === FOCUS_COLOR_CUSTOM
+                  ? html`<span class="swatch on" style="background:${rgb565(d.focusRgb)}">${icons.check(18)}</span>`
+                  : nothing}
+              </div>
+              ${d.focusColor === FOCUS_COLOR_CUSTOM ? html`<small class="muted small">${tr("set.focusColor.custom")}</small>` : nothing}
+            </div>`
+          : nothing}
+      </div>
+      <div class="list">
+        ${this.sliderRow(tr("set.tracking"), s.tracking, -2, 3, 1, (v) => (v > 0 ? `+${v}` : String(v)), (v) => this.put({ tracking: v }))}
+        ${this.sliderRow(tr("set.anchor"), s.anchorPercent, 30, 40, 1, (v) => `${v}%`, (v) => this.put({ anchorPercent: v }))}
+        ${this.sliderRow(tr("set.guideWidth"), s.guideWidth, 12, 30, 1, (v) => `${v} px`, (v) => this.put({ guideWidth: v }))}
+        ${this.sliderRow(tr("set.guideGap"), s.guideGap, 2, 8, 1, (v) => `${v} px`, (v) => this.put({ guideGap: v }))}
+      </div>
     `;
   }
 
-  private segmented<K extends keyof DeviceSettings>(
-    key: K,
-    current: DeviceSettings[K],
-    options: ReadonlyArray<DeviceSettings[K]>,
-    labels: Record<string, string>,
-    title?: string,
-    tooltipKey?: string,
-  ) {
-    const showHeader = title || tooltipKey;
+  /** A word as the reader shows it: focus letter in the highlight color, neighbours dimmed. */
+  private renderSample(s: DeviceSettings, focusCss: string) {
+    const [before, word, after] = tr("set.sampleWords").split(" ");
+    // Optimal recognition point, as the reader picks it (by word length).
+    const n = word.length;
+    const focus = n <= 1 ? 0 : n <= 5 ? 1 : n <= 9 ? 2 : n <= 13 ? 3 : 4;
+    return html`<div class="sample ${s.theme}">
+      <span class="phantom">${s.phantomWords ? before : ""}</span>
+      <span class="word size-${s.fontSizeIndex}"
+        >${word.slice(0, focus)}<b style=${s.focusHighlight ? `color:${focusCss}` : ""}>${word[focus]}</b>${word.slice(focus + 1)}</span
+      >
+      <span class="phantom">${s.phantomWords ? after : ""}</span>
+    </div>`;
+  }
+
+  // ─── Screen ──────────────────────────────────────────────────────────────
+
+  private renderDisplay(s: DeviceSettings) {
+    const d = s.device;
     return html`
-      <label class="seg">
-        ${showHeader
-          ? html`<span class="label-with-tooltip"
-              >${title ?? ""}${tooltipKey
-                ? html`<setting-tooltip settingKey=${tooltipKey}></setting-tooltip>`
-                : ""}</span
-            >`
-          : ""}
-        <div class="seg-buttons">
-          ${options.map(
-            (opt) => html`
-              <button
-                class=${opt === current ? "active" : ""}
-                @click=${() => this.put({ [key]: opt } as Partial<DeviceSettings>)}
-              >
-                ${labels[opt as string]}
-              </button>
-            `,
-          )}
+      <div class="list">
+        ${this.segRow(tr("set.theme"), s.theme, [
+          ["light", tr("set.theme.light")],
+          ["dark", tr("set.theme.dark")],
+          ["night", tr("set.theme.night")],
+        ], (v) => this.put({ theme: v }))}
+        ${this.sliderRow(tr("set.brightness"), Math.max(10, s.brightness), 10, 100, 1, (v) => `${v}%`, (v) => this.put({ brightness: v }))}
+        ${this.segRow(tr("set.hand"), s.readerHand, [
+          ["right", tr("set.hand.right")],
+          ["left", tr("set.hand.left")],
+        ], (v) => this.put({ readerHand: v }))}
+        ${this.selectRow(tr("set.readerLanguage"), s.language, SUPPORTED_LANGS.map((l) => [l, LANG_NAMES[l]] as [Language, string]), (v) =>
+          this.put({ language: v }),
+        )}
+      </div>
+      <span class="section-title">${tr("set.hud")}</span>
+      <div class="list">
+        ${this.switchRow(tr("set.hud.battery"), s.showBatteryWhileReading, (v) => this.put({ showBatteryWhileReading: v }))}
+        ${this.switchRow(tr("set.hud.chapter"), s.showChapterWhileReading, (v) => this.put({ showChapterWhileReading: v }))}
+        ${this.switchRow(tr("set.hud.progress"), s.showPercentWhileReading, (v) => this.put({ showPercentWhileReading: v }))}
+        ${this.selectRow(tr("set.footer"), s.footerMetric, (["percentage", "chapter_time", "book_time"] as const).map((m) => [m, tr(`set.footer.${m}`)] as [typeof m, string]), (v) =>
+          this.put({ footerMetric: v }),
+        )}
+        ${this.selectRow(tr("set.batteryLabel"), s.batteryLabel, (["percent", "time_remaining", "voltage"] as const).map((m) => [m, tr(`set.batteryLabel.${m}`)] as [typeof m, string]), (v) =>
+          this.put({ batteryLabel: v }),
+        )}
+        ${d
+          ? this.selectRow(tr("set.batteryStyle"), d.batteryStyle, [0, 1, 2, 3].map((i) => [i, tr(`set.batteryStyle.${i}`)] as [number, string]), (v) =>
+              this.putDevice({ batteryStyle: v }),
+            )
+          : nothing}
+      </div>
+    `;
+  }
+
+  // ─── Menu and theme ──────────────────────────────────────────────────────
+
+  private renderMenu(s: DeviceSettings) {
+    const d = s.device!;
+    const o = s.options!;
+    return html`
+      <span class="section-title">${tr("set.palette")}</span>
+      <div class="palettes">
+        ${o.palettes.map((p, i) => {
+          const [bg, fg, ac] = p.c ?? [s.theme === "light" ? 0xdeda : 0x0000, s.theme === "light" ? 0x0000 : 0xffff, o.focusColors[d.focusColor] ?? 0x001f];
+          return html`<button class=${d.menuPalette === i ? "palette on" : "palette"} @click=${() => this.putDevice({ menuPalette: i })}>
+            <span class="pal-preview" style="background:${rgb565(bg)};color:${rgb565(fg)}">
+              <span class="pal-line" style="background:${rgb565(fg)}"></span>
+              <span class="pal-chip" style="background:${rgb565(ac)}"></span>
+            </span>
+            <span class="pal-name">${i === 0 ? tr("set.palette.classic").split(":")[0] : p.n}</span>
+          </button>`;
+        })}
+      </div>
+      ${d.menuPalette === 0 ? html`<p class="muted small">${tr("set.palette.classic")}</p>` : nothing}
+      <div class="list">
+        ${d.menuPalette !== 0
+          ? this.switchRow(tr("set.ownAccent"), d.menuOwnAccent, (v) => this.putDevice({ menuOwnAccent: v }), tr("set.ownAccent.desc"))
+          : nothing}
+        ${this.selectRow(tr("set.menuFont"), d.menuFont, [[-1, tr("set.menuFont.follow")] as [number, string], ...o.menuFonts.map((f, i) => [i, f] as [number, string])], (v) =>
+          this.putDevice({ menuFont: v }),
+        )}
+        ${this.selectRow(tr("set.layout"), d.menuLayout, [0, 1, 2, 3].map((i) => [i, tr(`set.layout.${i}`)] as [number, string]), (v) =>
+          this.putDevice({ menuLayout: v }),
+        )}
+        ${this.selectRow(tr("set.librarySort"), d.librarySort, [0, 1, 2, 3].map((i) => [i, tr(`set.librarySort.${i}`)] as [number, string]), (v) =>
+          this.putDevice({ librarySort: v }),
+        )}
+        ${this.switchRow(tr("set.helpHints"), d.helpHints, (v) => this.putDevice({ helpHints: v }))}
+        ${this.switchRow(tr("set.savePointNames"), d.savePointNames, (v) => this.putDevice({ savePointNames: v }))}
+      </div>
+    `;
+  }
+
+  // ─── Screensaver and power ───────────────────────────────────────────────
+
+  private renderPower(s: DeviceSettings) {
+    const d = s.device!;
+    const o = s.options!;
+    const minutes = (list: number[], zeroNever: boolean) =>
+      list.map((m, i) => [i, m === 0 && zeroNever ? tr("common.never") : tr("common.minutes", { n: m })] as [number, string]);
+    return html`
+      <div class="list">
+        ${this.selectRow(tr("set.saver"), d.screensaverMode, o.screensaverModes.map((m) => [m, tr(`set.saver.${m}`)] as [number, string]), (v) =>
+          this.putDevice({ screensaverMode: v }),
+        )}
+        ${this.selectRow(tr("set.saverAfter"), d.screensaverTimeout, minutes(o.screensaverTimeoutMin, false), (v) =>
+          this.putDevice({ screensaverTimeout: v }),
+        )}
+        ${this.selectRow(tr("set.autoOff"), d.screensaverAutoOff, minutes(o.screensaverAutoOffMin, true), (v) =>
+          this.putDevice({ screensaverAutoOff: v }), tr("set.autoOff.desc"),
+        )}
+        ${this.selectRow(tr("set.sleepGuard"), d.sleepGuard, minutes(o.sleepGuardMin, true), (v) =>
+          this.putDevice({ sleepGuard: v }), tr("set.sleepGuard.desc"),
+        )}
+      </div>
+    `;
+  }
+
+  // ─── Connectivity ────────────────────────────────────────────────────────
+
+  private renderConnect(s: DeviceSettings) {
+    const d = s.device;
+    return html`
+      <span class="section-title">${tr("set.homeWifi")}</span>
+      <div class="list">
+        <div class="item stack">
+          <small class="muted small">${tr("set.homeWifi.desc")}</small>
+          <span class="wifi-state">
+            ${this.wifi?.configured ? tr("set.homeWifi.saved", { ssid: this.wifi.ssid }) : tr("set.homeWifi.none")}
+          </span>
+          <label class="field">
+            ${tr("set.ssid")}
+            <input class="input" type="text" .value=${this.wifiSsidInput} autocomplete="off"
+              @input=${(e: Event) => (this.wifiSsidInput = (e.target as HTMLInputElement).value)} />
+          </label>
+          <label class="field">
+            ${tr("set.password")}
+            <input class="input" type="password" .value=${this.wifiPasswordInput}
+              placeholder=${this.wifi?.passwordSet ? tr("set.password.keep") : ""}
+              @input=${(e: Event) => (this.wifiPasswordInput = (e.target as HTMLInputElement).value)} />
+          </label>
+          ${this.wifiError ? html`<p class="error">${this.wifiError}</p>` : nothing}
+          <div class="row">
+            <button class="btn" ?disabled=${this.wifiBusy || !this.wifi?.configured} @click=${this.forgetWifiStation}>${tr("set.forget")}</button>
+            <button class="btn primary" ?disabled=${this.wifiBusy} @click=${this.saveWifiStation}>${tr("set.saveNetwork")}</button>
+          </div>
         </div>
-      </label>
+      </div>
+      <div class="list">
+        ${d ? this.switchRow(tr("set.autoUpdate"), d.autoUpdate, (v) => this.putDevice({ autoUpdate: v }), tr("set.autoUpdate.desc")) : nothing}
+        ${d ? this.switchRow(tr("set.bluetooth"), d.bluetooth, (v) => this.putDevice({ bluetooth: v }), tr("set.bluetooth.desc")) : nothing}
+        ${this.sliderRow(
+          tr("set.wifiTimeout"),
+          this.wifiTimeoutMinutes,
+          0,
+          60,
+          5,
+          (v) => (v === 0 ? tr("common.never") : tr("common.minutes", { n: v })),
+          (v) => void this.setWifiTimeoutMinutes(v),
+        )}
+      </div>
     `;
   }
 
-  // ─── network ──────────────────────────────────────────────────────────────
+  // ─── Language ────────────────────────────────────────────────────────────
+
+  private renderLanguage(s: DeviceSettings) {
+    const chosen = chosenLang();
+    const option = (value: SupportedLang | null, label: string) => html`
+      <button class="item" @click=${() => chooseLang(value)}>
+        <span class="label">${label}</span>
+        ${chosen === value ? html`<span class="tick">${icons.check()}</span>` : nothing}
+      </button>
+    `;
+    return html`
+      <span class="section-title">${tr("set.appLanguage")}</span>
+      <div class="list">
+        ${option(null, `${tr("set.appLanguage.auto")} (${LANG_NAMES[s.language as SupportedLang] ?? s.language})`)}
+        ${SUPPORTED_LANGS.map((l) => option(l, LANG_NAMES[l]))}
+      </div>
+      <div class="list">
+        ${this.selectRow(tr("set.readerLanguage"), s.language, SUPPORTED_LANGS.map((l) => [l, LANG_NAMES[l]] as [Language, string]), (v) =>
+          this.put({ language: v }),
+        )}
+      </div>
+    `;
+  }
+
+  // ─── About ───────────────────────────────────────────────────────────────
+
+  private renderAbout(s: DeviceSettings) {
+    return html`
+      <div class="list">
+        <button class="item brand-row" @click=${this.onBrandTap}>
+          <span class="label">${tr("set.appVersion")}
+            ${this.tapCount > 0 && this.tapCount < 10 && !s.devMode ? html`<small>${tr("set.devTaps", { n: 10 - this.tapCount })}</small>` : nothing}
+            ${this.justUnlocked ? html`<small class="ok-text">${tr("set.devOn")}</small>` : nothing}
+          </span>
+          <span class="value">${APP_VERSION}</span>
+        </button>
+        <div class="item"><span class="label">${tr("set.readerVersion")}</span><span class="value">${this.readerFirmware || "—"}</span></div>
+        <div class="item"><span class="label">${tr("set.connection")}</span><span class="value">${this.connection || "—"}</span></div>
+      </div>
+      ${s.devMode ? this.renderDeveloper(s) : nothing}
+    `;
+  }
+
+  private renderDeveloper(s: DeviceSettings) {
+    return html`
+      <span class="section-title">${tr("set.dev")}</span>
+      <div class="list">
+        ${this.switchRow(tr("set.devMode"), s.devMode, (v) => this.put({ devMode: v }), tr("set.devMode.desc"))}
+        <div class="item stack">
+          <span class="head"><span>${tr("set.diag")}</span>
+            <button class="btn small" ?disabled=${this.diagBusy} @click=${this.refreshDiagnostics}>${tr("common.refresh")}</button></span>
+          ${this.deviceInfo
+            ? html`<ul class="diag">
+                <li><span>${tr("set.diag.mode")}</span><strong>${this.deviceInfo.mode === "station" ? tr("set.diag.station") : tr("set.diag.ap")}</strong></li>
+                <li><span>${tr("set.diag.network")}</span><strong>${this.deviceInfo.networkSsid || "—"}</strong></li>
+                <li><span>${tr("home.battery")}</span><strong>${this.deviceInfo.batteryPercent}%</strong></li>
+                <li><span>${tr("set.diag.card")}</span><strong>${tr("set.diag.cardFree", { free: formatKb(this.deviceInfo.sdFreeKb), total: formatKb(this.deviceInfo.sdTotalKb) })}</strong></li>
+              </ul>`
+            : nothing}
+        </div>
+        <div class="item stack">
+          <span class="head"><span>${tr("set.logs")}</span>
+            <button class="btn small" @click=${this.toggleLogs}>${this.showLogs ? tr("set.logs.hide") : tr("set.logs.show")}</button></span>
+          ${this.showLogs
+            ? html`<div class="row">
+                  <button class="btn small" ?disabled=${this.diagBusy} @click=${this.refreshLogs}>${tr("common.refresh")}</button>
+                  <button class="btn small" ?disabled=${this.diagBusy} @click=${this.clearLogs}>${tr("set.logs.clear")}</button>
+                </div>
+                <pre class="log">${this.logLines.length ? this.logLines.join("\n") : tr("set.logs.empty")}</pre>`
+            : nothing}
+        </div>
+      </div>
+    `;
+  }
+
+  // ─── Row builders ────────────────────────────────────────────────────────
+
+  private switchRow(label: string, value: boolean, set: (v: boolean) => void, desc?: string) {
+    return html`<label class="item">
+      <span class="label">${label}${desc ? html`<small>${desc}</small>` : nothing}</span>
+      <input class="switch" type="checkbox" .checked=${value} @change=${(e: Event) => set((e.target as HTMLInputElement).checked)} />
+    </label>`;
+  }
+
+  private segRow<T extends string | number>(label: string, value: T, options: Array<[T, string]>, set: (v: T) => void) {
+    return html`<div class="item stack">
+      <span class="head"><span>${label}</span></span>
+      <div class="seg">
+        ${options.map(([v, text]) => html`<button class=${v === value ? "on" : ""} @click=${() => set(v)}>${text}</button>`)}
+      </div>
+    </div>`;
+  }
+
+  private selectRow<T extends string | number>(label: string, value: T, options: Array<[T, string]>, set: (v: T) => void, desc?: string) {
+    return html`<label class="item">
+      <span class="label">${label}${desc ? html`<small>${desc}</small>` : nothing}</span>
+      <select
+        class="pick"
+        @change=${(e: Event) => {
+          const raw = (e.target as HTMLSelectElement).value;
+          const match = options.find(([v]) => String(v) === raw);
+          if (match) set(match[0]);
+        }}
+      >
+        ${options.map(([v, text]) => html`<option value=${String(v)} ?selected=${v === value}>${text}</option>`)}
+      </select>
+    </label>`;
+  }
+
+  /** Slider: the value follows the finger, the reader gets it on release. */
+  private sliderRow(label: string, value: number, min: number, max: number, step: number, format: (v: number) => string, set: (v: number) => void) {
+    return html`<div class="item stack">
+      <span class="head"><span>${label}</span><span class="value">${format(value)}</span></span>
+      <input
+        type="range"
+        min=${min}
+        max=${max}
+        step=${step}
+        .value=${String(value)}
+        style=${rangeFill(value, min, max)}
+        @input=${(e: Event) => {
+          const input = e.target as HTMLInputElement;
+          input.style.cssText = rangeFill(Number(input.value), min, max);
+          const valueEl = input.parentElement?.querySelector(".value");
+          if (valueEl) valueEl.textContent = format(Number(input.value));
+        }}
+        @change=${(e: Event) => set(Number((e.target as HTMLInputElement).value))}
+      />
+    </div>`;
+  }
+
+  // ─── Data ────────────────────────────────────────────────────────────────
 
   private async load() {
     try {
       this.settings = await deviceApi.getSettings();
-      // Sync i18n module with device language on initial load
-      if (this.settings) {
-        setLang(deviceLangToSupported(this.settings.language));
-      }
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
     }
@@ -680,49 +595,34 @@ export class SettingsPanel extends LitElement {
 
   private async put(patch: Partial<DeviceSettings>) {
     if (!this.settings) return;
-    // Optimistic update — natychmiast aktualizuj UI, w razie czego cofnij.
     const previous = this.settings;
     this.settings = { ...previous, ...patch };
     this.saving = true;
     this.error = "";
-
-    // Sync i18n when language changes
-    if ("language" in patch && patch.language) {
-      setLang(deviceLangToSupported(patch.language));
-    }
-
     try {
       this.settings = await deviceApi.putSettings(patch);
-      // Powiedz rodzicowi (app.element.ts) żeby odświeżył DEV badge w header.
-      if ("devMode" in patch && previous.devMode !== this.settings.devMode) {
-        this.dispatchEvent(
-          new CustomEvent("device-settings-changed", {
-            bubbles: true,
-            composed: true,
-            detail: this.settings,
-          }),
-        );
-      }
+      // The shell follows the reader's language, colors and DEV badge.
+      this.dispatchEvent(new CustomEvent("device-settings-changed", { bubbles: true, composed: true, detail: this.settings }));
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
       this.settings = previous;
-      // Revert i18n on failure
-      if ("language" in patch) {
-        setLang(deviceLangToSupported(previous.language));
-      }
     } finally {
       this.saving = false;
     }
   }
 
-  // ─── Sieć: stacja WiFi + auto-off ────────────────────────────────────────
+  private putDevice(patch: Partial<ReaderDeviceSettings>) {
+    const device = this.settings?.device;
+    if (!device) return;
+    void this.put({ device: { ...device, ...patch } });
+  }
 
   private async loadNetwork(): Promise<void> {
     try {
       this.wifi = await deviceApi.getWifiStation();
       this.wifiSsidInput = this.wifi.ssid;
     } catch {
-      /* urządzenie nie odpowiada — zostaw poprzedni stan */
+      /* the reader didn't answer, keep what we had */
     }
     try {
       this.wifiTimeoutMinutes = Math.round((await deviceApi.setWifiTimeoutSeconds()) / 60);
@@ -734,7 +634,7 @@ export class SettingsPanel extends LitElement {
   private saveWifiStation = async () => {
     const ssid = this.wifiSsidInput.trim();
     if (!ssid) {
-      this.wifiError = "Podaj nazwę sieci (SSID).";
+      this.wifiError = tr("set.ssidNeeded");
       return;
     }
     this.wifiBusy = true;
@@ -772,7 +672,10 @@ export class SettingsPanel extends LitElement {
     }
   };
 
-  // ─── Diagnostyka + logi (developer) ──────────────────────────────────────
+  private handleRestartTutorial(): void {
+    this.page = "root";
+    this.dispatchEvent(new CustomEvent("restart-tutorial", { bubbles: true, composed: true }));
+  }
 
   private refreshDiagnostics = async () => {
     this.diagBusy = true;
@@ -793,8 +696,7 @@ export class SettingsPanel extends LitElement {
   private refreshLogs = async () => {
     this.diagBusy = true;
     try {
-      const tail = await deviceApi.getLogTail(80);
-      this.logLines = tail.lines;
+      this.logLines = (await deviceApi.getLogTail(80)).lines;
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
     } finally {
@@ -814,18 +716,12 @@ export class SettingsPanel extends LitElement {
     }
   };
 
-  // ─── 10-tap unlock ────────────────────────────────────────────────────────
-
+  // Ten taps on the app version unlock developer mode.
   private onBrandTap = () => {
-    if (!this.settings) return;
-    if (this.settings.devMode) return; // już odblokowane
-
+    if (!this.settings || this.settings.devMode) return;
     this.tapCount += 1;
     if (this.tapResetTimer) window.clearTimeout(this.tapResetTimer);
-    this.tapResetTimer = window.setTimeout(() => {
-      this.tapCount = 0;
-    }, 1500);
-
+    this.tapResetTimer = window.setTimeout(() => (this.tapCount = 0), 1500);
     if (this.tapCount >= 10) {
       this.tapCount = 0;
       void this.put({ devMode: true });
@@ -834,312 +730,223 @@ export class SettingsPanel extends LitElement {
     }
   };
 
-  static styles = css`
-    :host {
-      display: block;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-    .muted {
-      color: var(--muted);
-      margin: 0;
-      font: 0.92rem/1.5 var(--ns);
-    }
-    .small {
-      font-size: 0.8rem;
-    }
-    .error {
-      color: var(--err);
-      font: 0.9rem var(--ns);
-      margin: 0;
-    }
-    .brand {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      padding: 14px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius, 13px);
-      background: var(--paper-tint);
-      cursor: pointer;
-      user-select: none;
-      -webkit-user-select: none;
-    }
-    .brand strong {
-      font-family: var(--fr);
-      font-weight: 500;
-      font-size: 1.4rem;
-      color: var(--accent);
-    }
-    .brand span {
-      font: 0.85rem var(--ns);
-      color: var(--muted);
-    }
-    .tap-hint {
-      margin-top: 4px;
-      font: 600 0.7rem var(--mn);
-      letter-spacing: 0.02em;
-      color: var(--accent);
-    }
-    .tap-hint.ok {
-      color: var(--ok);
-    }
-    fieldset.group {
-      margin: 0;
-      padding: 16px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius, 13px);
-      background: var(--paper-tint);
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    fieldset.group.dev {
-      border-color: var(--accent);
-      background: rgba(46, 142, 255, 0.05);
-    }
-    legend {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      padding: 0 4px;
-    }
-    .legend-ico {
-      width: 22px;
-      height: 22px;
-      flex: 0 0 auto;
-      display: grid;
-      place-items: center;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm, 9px);
-      background: var(--sky-2);
-      color: var(--accent);
-    }
-    .legend-text {
-      font: 700 0.72rem var(--mn);
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--green);
-    }
-    .toggle {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      font: 0.95rem var(--ns);
-    }
-    .toggle input {
-      width: 44px;
-      height: 26px;
-      appearance: none;
-      border-radius: 999px;
-      background: var(--line);
-      position: relative;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .toggle input:checked {
-      background: var(--accent);
-    }
-    .toggle input::before {
-      content: "";
-      position: absolute;
-      top: 3px;
-      left: 3px;
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      background: #fff;
-      transition: transform 0.15s;
-    }
-    .toggle input:checked::before {
-      transform: translateX(18px);
-    }
-    .slider {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      font: 0.95rem var(--ns);
-    }
-    .slider span {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-    }
-    .slider small {
-      color: var(--muted);
-      font: 0.82rem var(--mn);
-    }
-    .slider input[type="range"] {
-      width: 100%;
-      accent-color: var(--accent);
-    }
-    .seg {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      font: 0.95rem var(--ns);
-    }
-    .seg-buttons {
-      display: grid;
-      grid-auto-flow: column;
-      grid-auto-columns: 1fr;
-      gap: 4px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm, 9px);
-      background: transparent;
-      overflow: hidden;
-    }
-    .seg-buttons button {
-      padding: 8px 10px;
-      border: 0;
-      border-right: 1px solid var(--line);
-      background: transparent;
-      color: var(--ink-soft);
-      font: 600 0.78rem var(--mn);
-      letter-spacing: 0.02em;
-      cursor: pointer;
-      transition: background 0.15s ease, color 0.15s ease;
-    }
-    .seg-buttons button:last-child {
-      border-right: 0;
-    }
-    .seg-buttons button.active {
-      background: var(--accent);
-      color: #fff;
-    }
-    .select {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      font: 0.95rem var(--ns);
-    }
-    .select select,
-    .select input[type="text"],
-    .select input[type="password"] {
-      padding: 10px 12px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm, 9px);
-      background: #fff;
-      font: 0.95rem var(--ns);
-      color: var(--ink);
-    }
-    .wifi-actions,
-    .log-actions {
-      display: flex;
-      gap: 8px;
-    }
-    .mini-cta {
-      flex: 1 1 auto;
-      padding: 9px 14px;
-      border: 1px solid var(--accent);
-      border-radius: var(--radius-sm, 9px);
-      color: #fff;
-      background: var(--accent);
-      font: 700 0.8rem var(--mn);
-      letter-spacing: 0.02em;
-      cursor: pointer;
-      transition: background 0.15s ease;
-    }
-    .mini-cta:active:not(:disabled) {
-      background: var(--accent-deep);
-    }
-    .mini-cta:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-    }
-    .mini-cta.ghost {
-      background: transparent;
-      color: var(--accent);
-      border: 1px solid var(--accent);
-    }
-    .dev-block {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding-top: 10px;
-      border-top: 1px dashed var(--line);
-    }
-    .dev-block-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-    }
-    .dev-block-head strong {
-      font: 700 0.8rem var(--mn);
-      color: var(--ink-soft);
-    }
-    .dev-block-head .mini-cta {
-      flex: 0 0 auto;
-    }
-    .diag-list {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      font: 0.8rem var(--mn);
-    }
-    .diag-list li {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      color: var(--muted);
-    }
-    .diag-list strong {
-      color: var(--ink);
-    }
-    .log-view {
-      margin: 0;
-      max-height: 220px;
-      overflow-y: auto;
-      padding: 10px 12px;
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm, 9px);
-      font: 0.72rem/1.5 var(--mn);
-      color: var(--ink-soft);
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-    .help-link {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 14px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius, 13px);
-      background: var(--paper-tint);
-      color: var(--ink);
-      font: 600 0.95rem var(--ns);
-      cursor: pointer;
-      transition: border-color 0.15s;
-    }
-    .help-link:hover {
-      border-color: var(--accent);
-    }
-    .help-link:active {
-      background: var(--sky-2);
-    }
-    .help-link svg {
-      flex-shrink: 0;
-      color: var(--accent);
-    }
-    .label-with-tooltip {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }
-  `;
-}
+  static styles = [
+    sharedStyles,
+    css`
+      :host {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .back {
+        align-self: flex-start;
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        margin-left: -6px;
+        padding: 6px 8px 6px 2px;
+        border: 0;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--accent-text);
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .page-title {
+        margin: -4px 2px 2px;
+        font-size: 1.35rem;
+        font-weight: 700;
+      }
+      .row-ico {
+        flex: 0 0 auto;
+        width: 36px;
+        height: 36px;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        background: var(--accent-soft);
+        color: var(--accent-text);
+      }
+      .chev,
+      .tick {
+        color: var(--muted);
+        display: grid;
+      }
+      .tick {
+        color: var(--accent-text);
+      }
+      .pick {
+        flex: 0 1 auto;
+        max-width: 55%;
+        min-height: 38px;
+        padding: 0 30px 0 12px;
+        border: 0;
+        border-radius: var(--radius-sm);
+        background: var(--surface-2)
+          url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a8d98' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")
+          no-repeat right 10px center;
+        appearance: none;
+        -webkit-appearance: none;
+        color: var(--text);
+        font-size: 0.88rem;
+        text-overflow: ellipsis;
+      }
+      select.input {
+        appearance: none;
+        -webkit-appearance: none;
+      }
+      .saving {
+        text-align: center;
+      }
+      .wifi-state {
+        font-weight: 600;
+      }
 
-declare global {
-  interface HTMLElementTagNameMap {
-    "settings-panel": SettingsPanel;
-  }
+      .sample {
+        display: flex;
+        align-items: baseline;
+        justify-content: center;
+        gap: 14px;
+        padding: 26px 12px;
+        border-radius: var(--radius-lg);
+        background: #000;
+        color: #fff;
+        overflow: hidden;
+      }
+      .sample.light {
+        background: rgb(222, 218, 214);
+        color: #000;
+      }
+      .sample.night {
+        color: rgb(255, 156, 0);
+      }
+      .sample .word {
+        font-size: 1.9rem;
+        font-weight: 500;
+        letter-spacing: 0.01em;
+      }
+      .sample .word.size-1 {
+        font-size: 2.3rem;
+      }
+      .sample .word.size-2 {
+        font-size: 2.8rem;
+      }
+      .sample .word b {
+        font-weight: inherit;
+      }
+      .sample .phantom {
+        opacity: 0.35;
+        font-size: 1.1rem;
+      }
+
+      .swatches {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .swatch {
+        width: 40px;
+        height: 40px;
+        display: grid;
+        place-items: center;
+        border: 0;
+        border-radius: 50%;
+        color: #fff;
+        cursor: pointer;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+      }
+      .swatch.on {
+        box-shadow:
+          0 0 0 2px var(--bg),
+          0 0 0 4px var(--text);
+      }
+
+      .palettes {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+        gap: 10px;
+      }
+      .palette {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 6px;
+        border: 0;
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+      }
+      .palette.on {
+        box-shadow: inset 0 0 0 2px var(--accent);
+      }
+      .pal-preview {
+        position: relative;
+        height: 52px;
+        border-radius: 9px;
+        overflow: hidden;
+        box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.25);
+      }
+      .pal-line {
+        position: absolute;
+        left: 10px;
+        top: 14px;
+        width: 46%;
+        height: 5px;
+        border-radius: 3px;
+        opacity: 0.85;
+      }
+      .pal-chip {
+        position: absolute;
+        left: 10px;
+        bottom: 10px;
+        width: 34px;
+        height: 12px;
+        border-radius: 6px;
+      }
+      .pal-name {
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .diag {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 0.85rem;
+      }
+      .diag li {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        color: var(--muted);
+      }
+      .diag strong {
+        color: var(--text);
+        text-align: right;
+      }
+      .log {
+        margin: 0;
+        max-height: 240px;
+        overflow: auto;
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: 0.72rem/1.5 var(--font-mono);
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+    `,
+  ];
 }
 
 function formatKb(kb: number): string {
@@ -1148,7 +955,8 @@ function formatKb(kb: number): string {
   return `${(kb / 1024 / 1024).toFixed(2)} GB`;
 }
 
-/** The reader lists only faces it can draw; the app offers the same set (plus the one in use). */
-function offeredTypeface(s: DeviceSettings, index: number): boolean {
-  return !s.typefacesAvailable || s.typefacesAvailable.includes(index) || index === s.typefaceIndex;
+declare global {
+  interface HTMLElementTagNameMap {
+    "settings-panel": SettingsPanel;
+  }
 }

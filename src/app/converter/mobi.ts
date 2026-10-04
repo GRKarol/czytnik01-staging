@@ -1,6 +1,7 @@
 import { initKf8File, initMobiFile, type Kf8, type Mobi } from "@lingo-reader/mobi-parser";
 import { extractEventsFromElement } from "./text-formats";
 import type { BookEvent, ParsedBook } from "./rsvp";
+import { tr } from "../i18n/index";
 
 /**
  * MOBI i AZW3 dzielą ten sam kontener PDB, różni je wewnętrzny układ treści
@@ -34,7 +35,7 @@ export async function parseMobi(file: File): Promise<ParsedBook> {
     const chunk = extractEventsFromElement(doc.body);
     if (!chunk.length || !chunk.some((e) => e.kind === "paragraph")) continue;
     if (!chunk.some((e) => e.kind === "chapter")) {
-      chunk.unshift({ kind: "chapter", text: `Rozdział ${i}` });
+      chunk.unshift({ kind: "chapter", text: tr("conv.chapterN", { n: i }) });
     }
     events.push(...chunk);
   }
@@ -42,7 +43,7 @@ export async function parseMobi(file: File): Promise<ParsedBook> {
   book.destroy();
 
   if (!events.length) {
-    throw new Error("Nie udało się wyodrębnić tekstu z pliku (uszkodzony lub zabezpieczony DRM?).");
+    throw new Error(tr("err.conv.mobi"));
   }
 
   const author = Array.isArray(metadata.author) ? metadata.author.join(", ") : metadata.author || "";

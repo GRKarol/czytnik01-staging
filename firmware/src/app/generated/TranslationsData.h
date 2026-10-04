@@ -300,7 +300,7 @@ inline const char *trKey3Lookup(uint8_t keyIndex, uint8_t langIndex) {
 }
 
 inline const char *trKey4Lookup(uint8_t keyIndex, uint8_t langIndex) {
-  static const char *const kTable[119][6] = {
+  static const char *const kTable[122][6] = {
       {"Battery indicator: ", "Indicador de bater\xED""a: ", "Indicateur batterie : ", "Akkuanzeige: ", "Indicator baterie: ", "Wska\xB3""nik baterii: "},  // BatteryStyleColon
       {"Icon + %", "Icono + %", "Ic\xF4""ne + %", "Symbol + %", "Pictogram\x8B"" + %", "Ikona + %"},  // BatteryStyleIconPercent
       {"Number in icon", "N\xFA""mero en icono", "Chiffre dans l'ic\xF4""ne", "Zahl im Symbol", "Num\x8B""r \xEE""n pictogram\x8B""", "Liczba w ikonie"},  // BatteryStyleNumberInIcon
@@ -420,6 +420,9 @@ inline const char *trKey4Lookup(uint8_t keyIndex, uint8_t langIndex) {
       {"send books from the Flower app. On the reader, open Device > Phone app.", "env\xED""a libros desde la app Flower. En el lector, abre Dispositivo > App m\xF3""vil.", "envoyez des livres depuis l'appli Flower. Sur le lecteur, ouvrez Appareil > Appli.", "B\xFC""cher schickst du aus der Flower-App. Am Reader Ger\xE4""t > Handy-App \xF6""ffnen.", "trimi\x8F""i c\x8B""r\x8F""i din aplica\x8F""ia Flower. Pe cititor deschide Dispozitiv > Aplica\x8F""ie.", "ksi\x97""\xB5""ki wy\x9F""lesz z aplikacji Flower. Na czytniku otw\xF3""rz Urz\x97""dzenie > Aplikacja."},  // WizTip8
       {"the ? circle next to a setting opens its full description.", "el c\xED""rculo ? junto a un ajuste abre su descripci\xF3""n completa.", "le rond ? \xE0"" c\xF4""t\xE9"" d'un r\xE9""glage ouvre sa description compl\xE8""te.", "der Kreis ? neben einer Einstellung \xF6""ffnet ihre ganze Beschreibung.", "cercul ? de l\xE2""ng\x8B"" o setare \xEE""i deschide descrierea complet\x8B"".", "k\xF3""\x83""ko ? przy opcji w Ustawieniach otwiera jej pe\x83""ny opis."},  // WizTip9
       {"change the text colors and font on the Reading look screen in Settings.", "cambia colores y fuente en Aspecto de lectura, dentro de Ajustes.", "changez couleurs et police dans Aspect de lecture, depuis les R\xE9""glages.", "Farben und Schrift \xE4""nderst du unter Leseansicht in den Optionen.", "schimbi culorile \x8D""i fontul \xEE""n Aspect lectur\x8B"", din Set\x8B""ri.", "kolory i czcionk\x99"" tekstu zmienisz na ekranie Wygl\x97""d czytania w Ustawieniach."},  // WizTip10
+      {"Search again", "Buscar de nuevo", "Rechercher \xE0"" nouveau", "Erneut suchen", "Caut\x8B"" din nou", "Szukaj ponownie"},  // WizWifiRescan
+      {"Wi-Fi is needed to download typefaces and books", "El Wi-Fi hace falta para descargar tipograf\xED""as y libros", "Le Wi-Fi sert \xE0"" t\xE9""l\xE9""charger polices et livres", "WLAN wird f\xFC""r Schriften und B\xFC""cher gebraucht", "Wi-Fi e necesar pentru fonturi \x8D""i c\x8B""r\x8F""i", "Wi-Fi jest potrzebne, \xB5""eby pobra\x9B"" czcionki i ksi\x97""\xB5""ki"},  // WizWifiRescanHint
+      {"Check the router or move closer, then search again", "Revisa el router o ac\xE9""rcate y busca de nuevo", "V\xE9""rifiez le routeur ou rapprochez-vous, puis relancez", "Pr\xFC""fe den Router oder geh n\xE4""her ran und such erneut", "Verific\x8B"" routerul sau apropie-te \x8D""i caut\x8B"" din nou", "Sprawd\xB3"" router albo podejd\xB3"" bli\xB5""ej i szukaj ponownie"},  // WizWifiNoneSub
   };
   return kTable[keyIndex][langIndex];
 }

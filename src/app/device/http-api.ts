@@ -33,7 +33,10 @@ import {
   type BookTextPage,
   type ChapterMark,
   type PictureKind,
+  type ReaderDeviceSettings,
+  type ReaderOptions,
 } from "./api";
+import { tr } from "../i18n/index";
 
 // Requests to the reader never hang: a phone that silently left the
 // reader's Wi-Fi otherwise waits a minute or more before fetch gives up.
@@ -89,6 +92,8 @@ interface FirmwareSettings {
     scrollMargin?: number;
   };
   developer?: { devMode?: boolean };
+  device?: ReaderDeviceSettings;
+  options?: ReaderOptions;
 }
 
 function fromFirmware(fw: FirmwareSettings): DeviceSettings {
@@ -146,6 +151,9 @@ function fromFirmware(fw: FirmwareSettings): DeviceSettings {
     // HUD metrics
     footerMetric: d.footerMetric ?? DEFAULT_SETTINGS.footerMetric,
     batteryLabel: d.batteryLabel ?? DEFAULT_SETTINGS.batteryLabel,
+    // Older firmware has neither: the app hides what it can't change.
+    device: fw.device ?? null,
+    options: fw.options ?? null,
   };
 }
 
@@ -197,6 +205,8 @@ function toFirmware(p: Partial<DeviceSettings>): Record<string, unknown> {
   // HUD metrics
   if (p.footerMetric != null) out.footerMetric = p.footerMetric;
   if (p.batteryLabel != null) out.batteryLabel = p.batteryLabel;
+  // Reader functions: same flat keys as the firmware's "device" section.
+  if (p.device) Object.assign(out, p.device);
   return out;
 }
 
@@ -210,14 +220,20 @@ export class HttpDeviceApi implements DeviceApi {
   private async json<T>(res: Response): Promise<T> {
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`Urządzenie odrzuciło żądanie (HTTP ${res.status}). ${text}`);
+      throw new Error(tr("err.deviceRejected", { status: res.status, text }));
     }
     return (await res.json()) as T;
   }
 
   async listBooks(): Promise<Book[]> {
-    const data = await this.json<{ books: Book[] }>(await fetch(this.url("/api/books"), { signal: timed() }));
-    return data.books;
+    const data = await this.json<{ books: Book[]; current?: string }>(
+      await fetch(this.url("/api/books"), { signal: timed() }),
+    );
+    // "current" is the file the reader has open ("books/x.rsvp"); an EPUB's
+    // entry carries the .epub name, so compare without the extension.
+    const stem = (name: string) => name.replace(/\.[^./]+$/, "");
+    const current = data.current ? stem(data.current) : "";
+    return data.books.map((b) => (current && stem(b.name) === current ? { ...b, current: true } : b));
   }
 
   async uploadBook(
@@ -246,13 +262,13 @@ export class HttpDeviceApi implements DeviceApi {
       xhr.onload = () => {
         clearTimeout(stallTimer);
         if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText);
-        else reject(new Error(`Upload nie powiódł się (${xhr.status}). ${xhr.responseText}`));
+        else reject(new Error(tr("err.uploadFailed", { status: xhr.status, text: xhr.responseText })));
       };
       xhr.onerror = () => {
         clearTimeout(stallTimer);
-        reject(new Error("Połączenie z czytnikiem zerwane w trakcie wysyłania."));
+        reject(new Error(tr("err.uploadLost")));
       };
-      xhr.onabort = () => reject(new Error("Wysyłanie stanęło na minutę, przerwane. Spróbuj ponownie bliżej czytnika."));
+      xhr.onabort = () => reject(new Error(tr("err.uploadStalled")));
       xhr.send(fd);
     });
     // {"ok":true,"path":"/books/books/x.epub"} -> "books/x.epub"
@@ -273,7 +289,7 @@ export class HttpDeviceApi implements DeviceApi {
       method: "DELETE",
     });
     if (!res.ok && res.status !== 404) {
-      throw new Error(`Nie udało się usunąć (${res.status}).`);
+      throw new Error(tr("err.deleteFailed", { status: res.status }));
     }
   }
 
@@ -315,10 +331,10 @@ export class HttpDeviceApi implements DeviceApi {
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
-          reject(new Error(`Urządzenie odrzuciło OTA (${xhr.status}): ${xhr.responseText}`));
+          reject(new Error(tr("err.otaRejected", { status: xhr.status, text: xhr.responseText })));
         }
       };
-      xhr.onerror = () => reject(new Error("Połączenie z urządzeniem zerwane przed końcem OTA."));
+      xhr.onerror = () => reject(new Error(tr("err.otaLost")));
       xhr.send(fd);
     });
   }
@@ -416,7 +432,7 @@ export class HttpDeviceApi implements DeviceApi {
     const query = `name=${encodeURIComponent(name)}&from=${from}&count=${count}&words=${words}`;
     const res = await fetch(this.url(`/api/books/text?${query}`), { signal: timed(SLOW_TIMEOUT_MS) });
     if (res.status === 404) {
-      throw new Error("Czytnik nie ma jeszcze edytora rozdziałów. Zaktualizuj firmware.");
+      throw new Error(tr("err.noChapterEditor"));
     }
     return this.json<BookTextPage>(res);
   }
@@ -449,7 +465,7 @@ export class HttpDeviceApi implements DeviceApi {
       { signal: timed() },
     );
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`Nie udało się pobrać obrazka (HTTP ${res.status}).`);
+    if (!res.ok) throw new Error(tr("err.pictureGet", { status: res.status }));
     return res.blob();
   }
 
@@ -465,11 +481,11 @@ export class HttpDeviceApi implements DeviceApi {
     if (res.status === 404) {
       throw new Error(
         text.includes("Book not found")
-          ? "Czytnik nie widzi tej książki. Odśwież listę."
-          : "Czytnik nie obsługuje jeszcze okładek. Zaktualizuj firmware.",
+          ? tr("err.bookNotFound")
+          : tr("err.noPictures"),
       );
     }
-    throw new Error(`Czytnik nie przyjął obrazka (HTTP ${res.status}). ${text}`);
+    throw new Error(tr("err.pictureRejected", { status: res.status, text }));
   }
 
   async deleteBookPicture(name: string, kind: PictureKind): Promise<void> {

@@ -1,0 +1,261 @@
+/**
+ * Every app string in the reader's six languages, side by side so a new
+ * key can't miss one. Placeholders: {name}. A few entries carry <b> and
+ * <code> (rendered with trHtml, never with user data inside).
+ */
+type L = "pl" | "en" | "de" | "es" | "fr" | "ro";
+type Entry = Partial<Record<L, string>> & { en: string };
+
+import { LIBRARY_STRINGS } from "./strings-library";
+import { SETTINGS_STRINGS } from "./strings-settings";
+import { MISC_STRINGS } from "./strings-misc";
+
+const APP_STRINGS: Record<string, Entry> = {
+  // ─── Common ────────────────────────────────────────────────────────────
+  "common.back": { pl: "Wróć", en: "Back", de: "Zurück", es: "Atrás", fr: "Retour", ro: "Înapoi" },
+  "common.close": { pl: "Zamknij", en: "Close", de: "Schließen", es: "Cerrar", fr: "Fermer", ro: "Închide" },
+  "common.cancel": { pl: "Anuluj", en: "Cancel", de: "Abbrechen", es: "Cancelar", fr: "Annuler", ro: "Anulează" },
+  "common.next": { pl: "Dalej", en: "Next", de: "Weiter", es: "Siguiente", fr: "Suivant", ro: "Înainte" },
+  "common.skip": { pl: "Pomiń", en: "Skip", de: "Überspringen", es: "Omitir", fr: "Passer", ro: "Sari peste" },
+  "common.done": { pl: "Gotowe", en: "Done", de: "Fertig", es: "Listo", fr: "Terminé", ro: "Gata" },
+  "common.save": { pl: "Zapisz", en: "Save", de: "Speichern", es: "Guardar", fr: "Enregistrer", ro: "Salvează" },
+  "common.refresh": { pl: "Odśwież", en: "Refresh", de: "Aktualisieren", es: "Actualizar", fr: "Actualiser", ro: "Reîmprospătează" },
+  "common.loading": { pl: "Wczytuję…", en: "Loading…", de: "Wird geladen…", es: "Cargando…", fr: "Chargement…", ro: "Se încarcă…" },
+  "common.saving": { pl: "Zapisuję…", en: "Saving…", de: "Wird gespeichert…", es: "Guardando…", fr: "Enregistrement…", ro: "Se salvează…" },
+  "common.retry": { pl: "Spróbuj ponownie", en: "Try again", de: "Erneut versuchen", es: "Reintentar", fr: "Réessayer", ro: "Încearcă din nou" },
+  "common.on": { pl: "Włączone", en: "On", de: "An", es: "Activado", fr: "Activé", ro: "Activat" },
+  "common.off": { pl: "Wyłączone", en: "Off", de: "Aus", es: "Desactivado", fr: "Désactivé", ro: "Dezactivat" },
+  "common.never": { pl: "Nigdy", en: "Never", de: "Nie", es: "Nunca", fr: "Jamais", ro: "Niciodată" },
+  "common.minutes": { pl: "{n} min", en: "{n} min", de: "{n} Min.", es: "{n} min", fr: "{n} min", ro: "{n} min" },
+  "common.unknownAuthor": { pl: "Nieznany autor", en: "Unknown author", de: "Unbekannter Autor", es: "Autor desconocido", fr: "Auteur inconnu", ro: "Autor necunoscut" },
+  "common.untitled": { pl: "Bez tytułu", en: "Untitled", de: "Ohne Titel", es: "Sin título", fr: "Sans titre", ro: "Fără titlu" },
+
+  // ─── Navigation, header ────────────────────────────────────────────────
+  "nav.home": { pl: "Start", en: "Home", de: "Start", es: "Inicio", fr: "Accueil", ro: "Acasă" },
+  "nav.books": { pl: "Książki", en: "Books", de: "Bücher", es: "Libros", fr: "Livres", ro: "Cărți" },
+  "nav.convert": { pl: "Konwerter", en: "Converter", de: "Konverter", es: "Conversor", fr: "Convertir", ro: "Convertor" },
+  "nav.plugins": { pl: "Pluginy", en: "Plugins", de: "Plugins", es: "Plugins", fr: "Plugins", ro: "Pluginuri" },
+  "nav.more": { pl: "Więcej", en: "More", de: "Mehr", es: "Más", fr: "Plus", ro: "Mai mult" },
+  "status.connected": { pl: "Połączono", en: "Connected", de: "Verbunden", es: "Conectado", fr: "Connecté", ro: "Conectat" },
+  "status.offline": { pl: "Brak połączenia", en: "Not connected", de: "Nicht verbunden", es: "Sin conexión", fr: "Non connecté", ro: "Neconectat" },
+  "status.dev": { pl: "DEV", en: "DEV", de: "DEV", es: "DEV", fr: "DEV", ro: "DEV" },
+
+  // ─── Home: not connected ───────────────────────────────────────────────
+  "home.offline.title": {
+    pl: "Połącz z czytnikiem",
+    en: "Connect your reader",
+    de: "Reader verbinden",
+    es: "Conecta tu lector",
+    fr: "Connectez votre liseuse",
+    ro: "Conectează cititorul",
+  },
+  "home.offline.lead": {
+    pl: "Wysyłaj książki, ustawiaj okładki i rozdziały, zmieniaj ustawienia czytnika. Wszystko z telefonu, bez kabla.",
+    en: "Send books, set covers and chapters, change the reader's settings. All from your phone, no cable.",
+    de: "Bücher senden, Cover und Kapitel festlegen, Reader-Einstellungen ändern. Alles vom Handy, ohne Kabel.",
+    es: "Envía libros, pon portadas y capítulos, cambia los ajustes del lector. Todo desde el móvil, sin cables.",
+    fr: "Envoyez des livres, réglez couvertures et chapitres, changez les réglages de la liseuse. Depuis le téléphone, sans câble.",
+    ro: "Trimite cărți, setează coperți și capitole, schimbă setările cititorului. Totul de pe telefon, fără cablu.",
+  },
+  "home.recommended": { pl: "Polecane", en: "Recommended", de: "Empfohlen", es: "Recomendado", fr: "Recommandé", ro: "Recomandat" },
+  "home.wifi.desc": {
+    pl: "Książki, okładki, rozdziały, ustawienia i aktualizacje.",
+    en: "Books, covers, chapters, settings and updates.",
+    de: "Bücher, Cover, Kapitel, Einstellungen und Updates.",
+    es: "Libros, portadas, capítulos, ajustes y actualizaciones.",
+    fr: "Livres, couvertures, chapitres, réglages et mises à jour.",
+    ro: "Cărți, coperți, capitole, setări și actualizări.",
+  },
+  "home.bt.desc": {
+    pl: "Krótkie polecenia na Androidzie.",
+    en: "Quick commands on Android.",
+    de: "Kurze Befehle unter Android.",
+    es: "Órdenes rápidas en Android.",
+    fr: "Commandes rapides sous Android.",
+    ro: "Comenzi rapide pe Android.",
+  },
+  "home.bt.unsupported": {
+    pl: "Ta przeglądarka nie obsługuje Bluetooth. iPhone nie ma Web Bluetooth.",
+    en: "This browser has no Bluetooth support. iPhone has no Web Bluetooth.",
+    de: "Dieser Browser unterstützt kein Bluetooth. Das iPhone hat kein Web Bluetooth.",
+    es: "Este navegador no admite Bluetooth. El iPhone no tiene Web Bluetooth.",
+    fr: "Ce navigateur ne gère pas le Bluetooth. L'iPhone n'a pas Web Bluetooth.",
+    ro: "Acest browser nu suportă Bluetooth. iPhone nu are Web Bluetooth.",
+  },
+  "home.advanced.show": { pl: "Tryb serwisowy", en: "Service mode", de: "Servicemodus", es: "Modo de servicio", fr: "Mode service", ro: "Mod service" },
+  "home.advanced.hide": { pl: "Ukryj tryb serwisowy", en: "Hide service mode", de: "Servicemodus ausblenden", es: "Ocultar modo de servicio", fr: "Masquer le mode service", ro: "Ascunde modul service" },
+  "home.usb.desc": {
+    pl: "Diagnostyka. Kabel USB-C i Chrome albo Edge na komputerze.",
+    en: "Diagnostics. A USB-C cable and Chrome or Edge on a computer.",
+    de: "Diagnose. USB-C-Kabel und Chrome oder Edge am Computer.",
+    es: "Diagnóstico. Cable USB-C y Chrome o Edge en un ordenador.",
+    fr: "Diagnostic. Câble USB-C et Chrome ou Edge sur ordinateur.",
+    ro: "Diagnoză. Cablu USB-C și Chrome sau Edge pe calculator.",
+  },
+  "home.usb.unsupported": {
+    pl: "Web Serial działa tylko w Chrome i Edge na komputerze.",
+    en: "Web Serial works only in Chrome and Edge on a computer.",
+    de: "Web Serial funktioniert nur in Chrome und Edge am Computer.",
+    es: "Web Serial solo funciona en Chrome y Edge en un ordenador.",
+    fr: "Web Serial ne marche que dans Chrome et Edge sur ordinateur.",
+    ro: "Web Serial merge doar în Chrome și Edge pe calculator.",
+  },
+
+  // ─── Connecting ────────────────────────────────────────────────────────
+  "connect.title": { pl: "Łączę przez {method}", en: "Connecting over {method}", de: "Verbindung über {method}", es: "Conectando por {method}", fr: "Connexion par {method}", ro: "Conectare prin {method}" },
+  "connect.step.open": {
+    pl: "Na czytniku otwórz <b>Urządzenie → Aplikacja</b>. Czytnik włączy sieć <code>Flower-…</code> i pokaże kod QR.",
+    en: "On the reader open <b>Device → Phone app</b>. It turns on its <code>Flower-…</code> network and shows a QR code.",
+    de: "Öffne am Reader <b>Gerät → Handy-App</b>. Er startet sein Netz <code>Flower-…</code> und zeigt einen QR-Code.",
+    es: "En el lector abre <b>Dispositivo → App móvil</b>. Activará su red <code>Flower-…</code> y mostrará un código QR.",
+    fr: "Sur la liseuse, ouvrez <b>Appareil → Appli</b>. Elle active son réseau <code>Flower-…</code> et affiche un QR code.",
+    ro: "Pe cititor deschide <b>Dispozitiv → Aplicație</b>. Pornește rețeaua <code>Flower-…</code> și arată un cod QR.",
+  },
+  "connect.step.join": {
+    pl: "Naciśnij <b>Połącz z czytnikiem</b> i wybierz sieć <code>Flower-…</code> w okienku telefonu.",
+    en: "Tap <b>Connect to reader</b> and pick the <code>Flower-…</code> network in the phone's dialog.",
+    de: "Tippe auf <b>Mit Reader verbinden</b> und wähle das Netz <code>Flower-…</code> im Dialog des Handys.",
+    es: "Pulsa <b>Conectar con el lector</b> y elige la red <code>Flower-…</code> en el aviso del móvil.",
+    fr: "Touchez <b>Connecter la liseuse</b> et choisissez le réseau <code>Flower-…</code> dans la fenêtre du téléphone.",
+    ro: "Apasă <b>Conectează cititorul</b> și alege rețeaua <code>Flower-…</code> în fereastra telefonului.",
+  },
+  "connect.qr.fallback": {
+    pl: "Telefon nie widzi sieci czytnika? Zeskanuj kod QR z ekranu czytnika, aplikacja połączy się z tą siecią.",
+    en: "Phone can't see the reader's network? Scan the QR code on the reader and the app joins that network.",
+    de: "Das Handy sieht das Netz nicht? Scanne den QR-Code am Reader, die App verbindet sich mit genau diesem Netz.",
+    es: "¿El móvil no ve la red del lector? Escanea el código QR de su pantalla y la app se unirá a esa red.",
+    fr: "Le téléphone ne voit pas le réseau ? Scannez le QR code de la liseuse, l'app rejoindra ce réseau.",
+    ro: "Telefonul nu vede rețeaua? Scanează codul QR de pe cititor și aplicația se conectează la ea.",
+  },
+  "connect.qr.scan": { pl: "Zeskanuj kod QR", en: "Scan QR code", de: "QR-Code scannen", es: "Escanear código QR", fr: "Scanner le QR code", ro: "Scanează codul QR" },
+  "connect.step.manual": {
+    pl: "Zeskanuj kod QR aparatem albo wybierz sieć <code>Flower-…</code> w ustawieniach Wi-Fi telefonu.",
+    en: "Scan the QR code with the camera or pick the <code>Flower-…</code> network in the phone's Wi-Fi settings.",
+    de: "Scanne den QR-Code mit der Kamera oder wähle <code>Flower-…</code> in den WLAN-Einstellungen.",
+    es: "Escanea el código QR con la cámara o elige la red <code>Flower-…</code> en los ajustes Wi-Fi.",
+    fr: "Scannez le QR code avec l'appareil photo ou choisissez <code>Flower-…</code> dans les réglages Wi-Fi.",
+    ro: "Scanează codul QR cu camera sau alege rețeaua <code>Flower-…</code> în setările Wi-Fi.",
+  },
+  "connect.openWifi": { pl: "Otwórz ustawienia Wi-Fi", en: "Open Wi-Fi settings", de: "WLAN-Einstellungen öffnen", es: "Abrir ajustes Wi-Fi", fr: "Ouvrir les réglages Wi-Fi", ro: "Deschide setările Wi-Fi" },
+  "connect.noInternet": {
+    pl: "Telefon może ostrzec, że sieć nie ma internetu. To normalne, czytnik ma tylko własną sieć. Wybierz <b>Zostań połączony</b>, inaczej telefon przeskoczy na inną sieć.",
+    en: "The phone may warn that the network has no internet. That's expected, the reader only has its own network. Choose <b>Stay connected</b> or the phone jumps to another network.",
+    de: "Das Handy warnt evtl., dass das Netz kein Internet hat. Das ist normal. Wähle <b>Verbunden bleiben</b>, sonst wechselt das Handy das Netz.",
+    es: "El móvil puede avisar de que la red no tiene internet. Es normal. Elige <b>Mantener conexión</b> o el móvil cambiará de red.",
+    fr: "Le téléphone peut signaler que le réseau n'a pas internet. C'est normal. Choisissez <b>Rester connecté</b>, sinon il changera de réseau.",
+    ro: "Telefonul poate avertiza că rețeaua nu are internet. E normal. Alege <b>Rămâi conectat</b>, altfel trece pe altă rețea.",
+  },
+  "connect.return": {
+    pl: "Wróć tutaj. Aplikacja połączy się sama albo po <b>Sprawdź połączenie</b>.",
+    en: "Come back here. The app connects by itself or after <b>Check connection</b>.",
+    de: "Komm hierher zurück. Die App verbindet sich selbst oder nach <b>Verbindung prüfen</b>.",
+    es: "Vuelve aquí. La app se conecta sola o tras <b>Comprobar conexión</b>.",
+    fr: "Revenez ici. L'app se connecte seule ou après <b>Vérifier la connexion</b>.",
+    ro: "Revino aici. Aplicația se conectează singură sau după <b>Verifică conexiunea</b>.",
+  },
+  "connect.pickBt": { pl: "Wybierz czytnik w okienku przeglądarki.", en: "Pick the reader in the browser's dialog.", de: "Wähle den Reader im Browserdialog.", es: "Elige el lector en el aviso del navegador.", fr: "Choisissez la liseuse dans la fenêtre du navigateur.", ro: "Alege cititorul în fereastra browserului." },
+  "connect.pickUsb": { pl: "Wybierz port USB w okienku przeglądarki.", en: "Pick the USB port in the browser's dialog.", de: "Wähle den USB-Port im Browserdialog.", es: "Elige el puerto USB en el aviso del navegador.", fr: "Choisissez le port USB dans la fenêtre du navigateur.", ro: "Alege portul USB în fereastra browserului." },
+  "connect.connecting": { pl: "Łączę…", en: "Connecting…", de: "Verbinde…", es: "Conectando…", fr: "Connexion…", ro: "Se conectează…" },
+  "connect.join": { pl: "Połącz z czytnikiem", en: "Connect to reader", de: "Mit Reader verbinden", es: "Conectar con el lector", fr: "Connecter la liseuse", ro: "Conectează cititorul" },
+  "connect.check": { pl: "Sprawdź połączenie", en: "Check connection", de: "Verbindung prüfen", es: "Comprobar conexión", fr: "Vérifier la connexion", ro: "Verifică conexiunea" },
+  "connect.err.join": {
+    pl: "Telefon nie połączył się z siecią czytnika. Sprawdź, czy na czytniku jest otwarty ekran Aplikacja, i spróbuj jeszcze raz.",
+    en: "The phone didn't join the reader's network. Check that the Phone app screen is open on the reader and try again.",
+    de: "Das Handy hat sich nicht mit dem Netz des Readers verbunden. Ist am Reader die Handy-App-Ansicht offen? Versuch es noch einmal.",
+    es: "El móvil no se unió a la red del lector. Comprueba que la pantalla App móvil está abierta en el lector y vuelve a intentarlo.",
+    fr: "Le téléphone n'a pas rejoint le réseau de la liseuse. Vérifiez que l'écran Appli est ouvert et réessayez.",
+    ro: "Telefonul nu s-a conectat la rețeaua cititorului. Verifică dacă ecranul Aplicație e deschis pe cititor și încearcă din nou.",
+  },
+  "connect.err.qr": {
+    pl: "To nie jest kod czytnika Flower. Zeskanuj kod z ekranu Urządzenie → Aplikacja.",
+    en: "That's not a Flower reader code. Scan the one on Device → Phone app.",
+    de: "Das ist kein Flower-Code. Scanne den Code unter Gerät → Handy-App.",
+    es: "No es un código de un lector Flower. Escanea el de Dispositivo → App móvil.",
+    fr: "Ce n'est pas un code de liseuse Flower. Scannez celui de Appareil → Appli.",
+    ro: "Nu e un cod de cititor Flower. Scanează codul din Dispozitiv → Aplicație.",
+  },
+  "connect.err.qrJoin": {
+    pl: "Nie udało się połączyć z siecią {ssid}. Sprawdź, czy czytnik ma otwarty ekran Aplikacja, i spróbuj jeszcze raz.",
+    en: "Couldn't join {ssid}. Check that the Phone app screen is open on the reader and try again.",
+    de: "Verbindung mit {ssid} fehlgeschlagen. Ist am Reader die Handy-App-Ansicht offen? Versuch es noch einmal.",
+    es: "No se pudo unir a {ssid}. Comprueba que la pantalla App móvil está abierta y vuelve a intentarlo.",
+    fr: "Impossible de rejoindre {ssid}. Vérifiez que l'écran Appli est ouvert et réessayez.",
+    ro: "Nu m-am putut conecta la {ssid}. Verifică ecranul Aplicație de pe cititor și încearcă din nou.",
+  },
+  "connect.err.lost": {
+    pl: "Połączenie z czytnikiem zerwane. Czytnik mógł zamknąć ekran Aplikacja albo się zrestartować. Połącz się jeszcze raz.",
+    en: "Lost the reader. It may have left the Phone app screen or restarted. Connect again.",
+    de: "Verbindung zum Reader verloren. Er hat evtl. die Handy-App-Ansicht verlassen oder neu gestartet. Verbinde dich erneut.",
+    es: "Se perdió la conexión. El lector pudo cerrar la pantalla App móvil o reiniciarse. Vuelve a conectar.",
+    fr: "Connexion perdue. La liseuse a peut-être quitté l'écran Appli ou redémarré. Reconnectez-vous.",
+    ro: "Conexiunea s-a pierdut. Cititorul a închis ecranul Aplicație sau a repornit. Conectează-te din nou.",
+  },
+  "share.err": {
+    pl: "Nie udało się wysłać udostępnionego pliku: {error}",
+    en: "Couldn't send the shared file: {error}",
+    de: "Die geteilte Datei konnte nicht gesendet werden: {error}",
+    es: "No se pudo enviar el archivo compartido: {error}",
+    fr: "Impossible d'envoyer le fichier partagé : {error}",
+    ro: "Fișierul partajat nu a putut fi trimis: {error}",
+  },
+
+  // ─── Home: connected ───────────────────────────────────────────────────
+  "home.reading": { pl: "Teraz czytasz", en: "Reading now", de: "Du liest gerade", es: "Leyendo ahora", fr: "En cours de lecture", ro: "Citești acum" },
+  "home.noBook": {
+    pl: "Na czytniku nie ma jeszcze otwartej książki.",
+    en: "No book is open on the reader yet.",
+    de: "Am Reader ist noch kein Buch geöffnet.",
+    es: "Aún no hay ningún libro abierto en el lector.",
+    fr: "Aucun livre n'est encore ouvert sur la liseuse.",
+    ro: "Încă nu e deschisă nicio carte pe cititor.",
+  },
+  "home.read": { pl: "{n}% przeczytane", en: "{n}% read", de: "{n}% gelesen", es: "{n}% leído", fr: "{n} % lu", ro: "{n}% citit" },
+  "home.tile.send": { pl: "Wyślij książkę", en: "Send a book", de: "Buch senden", es: "Enviar libro", fr: "Envoyer un livre", ro: "Trimite o carte" },
+  "home.tile.send.desc": { pl: "Plik z telefonu na kartę czytnika", en: "From the phone to the reader's card", de: "Vom Handy auf die Karte", es: "Del móvil a la tarjeta del lector", fr: "Du téléphone à la carte", ro: "De pe telefon pe cardul cititorului" },
+  "home.tile.convert.desc": { pl: "PDF, EPUB, DOCX i inne", en: "PDF, EPUB, DOCX and more", de: "PDF, EPUB, DOCX u. a.", es: "PDF, EPUB, DOCX y más", fr: "PDF, EPUB, DOCX et plus", ro: "PDF, EPUB, DOCX și altele" },
+  "home.tile.library": { pl: "Biblioteka", en: "Library", de: "Bibliothek", es: "Biblioteca", fr: "Bibliothèque", ro: "Bibliotecă" },
+  "home.tile.library.desc": { pl: "Książki na czytniku: {n}", en: "Books on the reader: {n}", de: "Bücher am Reader: {n}", es: "Libros en el lector: {n}", fr: "Livres sur la liseuse : {n}", ro: "Cărți pe cititor: {n}" },
+  "home.tile.settings": { pl: "Ustawienia czytnika", en: "Reader settings", de: "Reader-Einstellungen", es: "Ajustes del lector", fr: "Réglages de la liseuse", ro: "Setările cititorului" },
+  "home.tile.settings.desc": { pl: "Tempo, wygląd, wygaszacz", en: "Speed, look, screensaver", de: "Tempo, Aussehen, Bildschirmschoner", es: "Velocidad, aspecto, salvapantallas", fr: "Vitesse, apparence, écran de veille", ro: "Viteză, aspect, protector ecran" },
+  "home.device": { pl: "Czytnik", en: "Reader", de: "Reader", es: "Lector", fr: "Liseuse", ro: "Cititor" },
+  "home.battery": { pl: "Bateria", en: "Battery", de: "Akku", es: "Batería", fr: "Batterie", ro: "Baterie" },
+  "home.card": { pl: "Karta", en: "Card", de: "Karte", es: "Tarjeta", fr: "Carte", ro: "Card" },
+  "home.cardFree": { pl: "Wolne na karcie", en: "Free on card", de: "Frei auf Karte", es: "Libre en tarjeta", fr: "Libre sur la carte", ro: "Liber pe card" },
+  "home.firmware": { pl: "Wersja", en: "Version", de: "Version", es: "Versión", fr: "Version", ro: "Versiune" },
+  "home.disconnect": { pl: "Rozłącz", en: "Disconnect", de: "Trennen", es: "Desconectar", fr: "Déconnecter", ro: "Deconectează" },
+
+  // ─── Plugins tab ───────────────────────────────────────────────────────
+  "plugins.lead": {
+    pl: "Dodatkowe funkcje wgrane na czytnik. Włączasz je i wyłączasz na czytniku, w zakładce Pluginy.",
+    en: "Extra features on the reader. Turn them on and off on the reader, in its Plugins tab.",
+    de: "Zusatzfunktionen auf dem Reader. Ein- und ausschalten am Reader im Tab Plugins.",
+    es: "Funciones extra del lector. Se activan y desactivan en el lector, en la pestaña Plugins.",
+    fr: "Fonctions en plus sur la liseuse. Activez-les sur la liseuse, onglet Plugins.",
+    ro: "Funcții în plus pe cititor. Le pornești și oprești pe cititor, în fila Pluginuri.",
+  },
+  "plugins.offline": {
+    pl: "Połącz się z czytnikiem, żeby zobaczyć jego pluginy.",
+    en: "Connect to the reader to see its plugins.",
+    de: "Verbinde dich mit dem Reader, um seine Plugins zu sehen.",
+    es: "Conéctate al lector para ver sus plugins.",
+    fr: "Connectez la liseuse pour voir ses plugins.",
+    ro: "Conectează cititorul ca să-i vezi pluginurile.",
+  },
+  "plugins.none": { pl: "Czytnik nie zgłosił żadnych pluginów.", en: "The reader reported no plugins.", de: "Der Reader meldet keine Plugins.", es: "El lector no indica ningún plugin.", fr: "La liseuse ne signale aucun plugin.", ro: "Cititorul nu raportează pluginuri." },
+  "plugins.active": { pl: "Włączony", en: "On", de: "Aktiv", es: "Activo", fr: "Activé", ro: "Activ" },
+  "plugins.inactive": { pl: "Wyłączony", en: "Off", de: "Aus", es: "Inactivo", fr: "Désactivé", ro: "Inactiv" },
+  "plugins.builtin": { pl: "Wbudowany", en: "Built in", de: "Integriert", es: "Integrado", fr: "Intégré", ro: "Integrat" },
+  "rss.title": { pl: "Kanały RSS", en: "RSS feeds", de: "RSS-Feeds", es: "Canales RSS", fr: "Flux RSS", ro: "Fluxuri RSS" },
+  "rss.none": { pl: "Brak kanałów.", en: "No feeds yet.", de: "Noch keine Feeds.", es: "Aún no hay canales.", fr: "Aucun flux.", ro: "Niciun flux încă." },
+  "rss.remove": { pl: "Usuń kanał", en: "Remove feed", de: "Feed entfernen", es: "Quitar canal", fr: "Retirer le flux", ro: "Șterge fluxul" },
+  "rss.add": { pl: "Dodaj", en: "Add", de: "Hinzufügen", es: "Añadir", fr: "Ajouter", ro: "Adaugă" },
+};
+
+export const STRINGS: Record<string, Entry> = {
+  ...APP_STRINGS,
+  ...LIBRARY_STRINGS,
+  ...SETTINGS_STRINGS,
+  ...MISC_STRINGS,
+};
+
+export type { Entry as StringEntry };

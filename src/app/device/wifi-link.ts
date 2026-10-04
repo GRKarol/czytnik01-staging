@@ -17,6 +17,7 @@ import { DEVICE_AP_BASE_URL } from "../../shared/config";
 import type { DeviceCommand, DeviceEvent } from "../../shared/device-protocol";
 import type { DeviceLink, TransportInfo } from "./device-link";
 import { isNativeApp, pinToReaderNetwork, releaseReaderNetwork } from "./network-pin";
+import { tr } from "../i18n/index";
 
 export interface WifiLinkOptions {
   /** Bazowy URL urządzenia. Domyślnie `http://192.168.4.1`. */
@@ -85,10 +86,10 @@ export class WifiLink implements DeviceLink {
     const isHttps = typeof location !== "undefined" && location.protocol === "https:";
     throw new Error(
       isHttps
-        ? `Przeglądarka zablokowała połączenie HTTPS → HTTP. Otwórz w telefonie ${this.base}/ bezpośrednio albo użyj aplikacji Flower.`
+        ? tr("err.mixedContent", { url: `${this.base}/` })
         : isNativeApp()
-          ? "Czytnik nie odpowiada. Sprawdź, czy telefon jest w sieci Flower-… i czy na czytniku jest otwarty ekran Aplikacja (Urządzenie → Synchronizacja)."
-          : `Nie udało się złapać urządzenia pod ${this.base}. Czy telefon jest podłączony do sieci urządzenia (Flower-…)?`,
+          ? tr("err.noAnswerApp")
+          : tr("err.noAnswer", { url: this.base }),
     );
   }
 
@@ -105,7 +106,7 @@ export class WifiLink implements DeviceLink {
       signal: AbortSignal.timeout(HELLO_TIMEOUT_MS),
     });
     if (!res.ok) {
-      throw new Error(`Urządzenie odrzuciło komendę (${res.status}).`);
+      throw new Error(tr("err.commandRejected", { status: res.status }));
     }
   }
 

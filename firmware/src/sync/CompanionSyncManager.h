@@ -39,6 +39,19 @@ class CompanionSyncManager {
   /** Library access for the Flower app's chapter editor (word index). */
   void setStorage(StorageManager *storage) { storage_ = storage; }
 
+  /** Settings saved from the app since the last call (the reader reloads them). */
+  bool consumeSettingsChanged() {
+    const bool changed = settingsChanged_;
+    settingsChanged_ = false;
+    return changed;
+  }
+  /** Books, chapters or pictures changed from the app since the last call. */
+  bool consumeLibraryChanged() {
+    const bool changed = libraryChanged_;
+    libraryChanged_ = false;
+    return changed;
+  }
+
  private:
   enum class NetworkMode : uint8_t {
     None,
@@ -145,7 +158,11 @@ class CompanionSyncManager {
   String otaError_;
   StorageManager *storage_ = nullptr;
   File pictureFile_;
+  size_t pictureBytes_ = 0;  // counted here: File::size() of a file open for writing is not
+                             // reliable on SD_MMC, it tripped the limit on a 21 KB cover
   String pictureError_;
+  bool settingsChanged_ = false;
+  bool libraryChanged_ = false;
   String pairingCode_;
   String networkSsid_;
   Preferences preferences_;

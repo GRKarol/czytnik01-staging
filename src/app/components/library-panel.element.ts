@@ -4,6 +4,7 @@ import { deviceApi, onDeviceApiChange, type Book, type DeviceCapabilities } from
 import { HttpDeviceApi } from "../device/http-api";
 import { extractEpubCover } from "../converter/epub";
 import { decodePicture, readerCoverColor, readerInitials } from "../books/pictures";
+import { onLangChange, tr } from "../i18n/index";
 import "./first-use-hint.element";
 import "./cover-editor.element";
 import "./chapter-editor.element";
@@ -14,9 +15,9 @@ const STORE_FAVORITES = "flower.library.favorites";
 const STORE_SORT = "flower.library.sort";
 
 const SORT_LABEL: Record<SortMode, string> = {
-  added: "Ostatnio dodane",
-  title: "Tytuł",
-  progress: "Postęp",
+  added: "lib.sort.added",
+  title: "lib.sort.title",
+  progress: "lib.sort.progress",
 };
 
 // Covers downloaded from the reader, by book name (data URLs).
@@ -43,16 +44,19 @@ export class LibraryPanel extends LitElement {
   @state() private chaptersFor: Book | null = null;
   @state() private covers = new Map<string, string>();
   private unsubApi: (() => void) | null = null;
+  private unsubLang: (() => void) | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
     void this.refresh();
     this.unsubApi = onDeviceApiChange(() => void this.refresh());
+    this.unsubLang = onLangChange(() => this.requestUpdate());
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.unsubApi?.();
+    this.unsubLang?.();
   }
 
   private get onReader(): boolean {
@@ -71,30 +75,25 @@ export class LibraryPanel extends LitElement {
   }
 
   render() {
-    if (this.loading) return html`<p class="muted">Wczytuję bibliotekę…</p>`;
+    if (this.loading) return html`<p class="muted">${tr("lib.loading")}</p>`;
 
     const list = this.filtered();
     return html`
       <first-use-hint screen-key="reading"></first-use-hint>
       ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
       ${!this.onReader
-        ? html`<p class="notice">
-            To przykładowa lista. Połącz się z czytnikiem na ekranie Start, żeby zobaczyć swoje książki.
-          </p>`
+        ? html`<p class="notice">${tr("lib.sample")}</p>`
         : nothing}
       ${this.onReader && (!this.picturesSupported || !this.chaptersSupported)
-        ? html`<p class="notice">
-            Okładki i edytor rozdziałów działają od firmware'u v0.3.63. Czytnik ma starszy, zaktualizuj go w
-            zakładce Aktualizacje.
-          </p>`
+        ? html`<p class="notice">${tr("lib.oldFirmware")}</p>`
         : nothing}
 
       <div class="actions">
         <input id="upload" type="file" accept=".rsvp,.txt,.epub" hidden @change=${this.onUpload} />
         <label for="upload" class="btn ${this.uploadProgress !== null ? "busy" : ""}">
-          ${this.uploadProgress !== null ? `Wysyłam… ${this.uploadProgress}%` : "Wyślij plik na czytnik"}
+          ${this.uploadProgress !== null ? tr("lib.sending", { n: this.uploadProgress }) : tr("lib.send")}
         </label>
-        <button class="btn ghost" @click=${this.refresh}>Odśwież</button>
+        <button class="btn ghost" @click=${this.refresh}>${tr("common.refresh")}</button>
       </div>
       ${this.uploadProgress !== null
         ? html`<div class="progress"><span style="width:${this.uploadProgress}%"></span></div>`
@@ -102,26 +101,24 @@ export class LibraryPanel extends LitElement {
       ${this.justSent ? this.renderJustSent(this.justSent) : nothing}
 
       <div class="tabs">
-        ${this.tabButton("all", "Wszystko", this.books.length)}
-        ${this.tabButton("book", "Książki", this.books.filter((b) => b.category !== "article").length)}
-        ${this.tabButton("article", "Artykuły", this.books.filter((b) => b.category === "article").length)}
+        ${this.tabButton("all", tr("lib.all"), this.books.length)}
+        ${this.tabButton("book", tr("lib.books"), this.books.filter((b) => b.category !== "article").length)}
+        ${this.tabButton("article", tr("lib.articles"), this.books.filter((b) => b.category === "article").length)}
       </div>
 
       <div class="sortbar">
-        <span class="sortbar-label">Sortuj:</span>
+        <span class="sortbar-label">${tr("lib.sortBy")}</span>
         ${(Object.keys(SORT_LABEL) as SortMode[]).map(
           (mode) => html`
             <button class=${this.sort === mode ? "sortbtn active" : "sortbtn"} @click=${() => this.setSort(mode)}>
-              ${SORT_LABEL[mode]}
+              ${tr(SORT_LABEL[mode])}
             </button>
           `,
         )}
       </div>
 
       ${list.length === 0
-        ? html`<p class="muted">
-            Pusto. Wyślij coś z telefonu albo przekonwertuj plik w zakładce <strong>Konwerter</strong>.
-          </p>`
+        ? html`<p class="muted">${tr("lib.empty")}</p>`
         : html`<ul class="list">
             ${list.map((b) => this.row(b))}
           </ul>`}
@@ -153,7 +150,7 @@ export class LibraryPanel extends LitElement {
     const book = this.books.find((b) => b.name === sent.name);
     return html`
       <div class="sent">
-        <p>Wysłano „${sent.title}”. Chcesz od razu dodać okładkę albo ustawić rozdziały?</p>
+        <p>${tr("lib.sent", { title: sent.title })}</p>
         <div class="row">
           ${this.picturesSupported
             ? html`<button
@@ -161,15 +158,15 @@ export class LibraryPanel extends LitElement {
                 ?disabled=${!book}
                 @click=${() => book && this.openCover(book, sent.epubCover)}
               >
-                ${sent.epubCover ? "Okładka (jest w pliku EPUB)" : "Dodaj okładkę"}
+                ${sent.epubCover ? tr("lib.coverFromEpub") : tr("lib.addCover")}
               </button>`
             : nothing}
           ${this.chaptersSupported
             ? html`<button class="btn small ghost" ?disabled=${!book} @click=${() => book && this.openChapters(book)}>
-                Rozdziały
+                ${tr("lib.chapters")}
               </button>`
             : nothing}
-          <button class="btn small ghost" @click=${() => (this.justSent = null)}>Nie teraz</button>
+          <button class="btn small ghost" @click=${() => (this.justSent = null)}>${tr("lib.notNow")}</button>
         </div>
       </div>
     `;
@@ -195,7 +192,7 @@ export class LibraryPanel extends LitElement {
             style=${picture ? `background-image:url(${picture})` : `background:${readerCoverColor(b.name)}`}
             ?disabled=${!this.picturesSupported}
             @click=${() => this.openCover(b, null)}
-            aria-label="Okładka"
+            aria-label=${tr("lib.cover")}
           >
             ${picture ? nothing : html`<span>${readerInitials(title)}</span>`}
           </button>
@@ -203,35 +200,35 @@ export class LibraryPanel extends LitElement {
             <strong>${title}</strong>
             <span>
               ${b.author ? `${b.author} · ` : ""}${formatBytes(b.bytes)}${b.progressPercent != null
-                ? ` · ${b.progressPercent}% przeczytane`
+                ? ` · ${tr("lib.readPct", { n: b.progressPercent })}`
                 : ""}
             </span>
             ${b.customChapters || b.hasSpine
               ? html`<span class="tags">
-                  ${b.customChapters ? html`<em>własne rozdziały</em>` : nothing}
-                  ${b.hasSpine ? html`<em>grzbiet</em>` : nothing}
+                  ${b.customChapters ? html`<em>${tr("lib.tag.chapters")}</em>` : nothing}
+                  ${b.hasSpine ? html`<em>${tr("lib.tag.spine")}</em>` : nothing}
                 </span>`
               : nothing}
           </div>
           <button
             class=${isFav ? "fav active" : "fav"}
             @click=${() => this.toggleFavorite(b.name)}
-            aria-label=${isFav ? "Usuń z ulubionych" : "Dodaj do ulubionych"}
+            aria-label=${isFav ? tr("lib.fav.remove") : tr("lib.fav.add")}
           >
             ${isFav ? "★" : "☆"}
           </button>
         </div>
         <div class="tools">
           <button class="tool" ?disabled=${!this.picturesSupported} @click=${() => this.openCover(b, null)}>
-            Okładka
+            ${tr("lib.cover")}
           </button>
           <button class="tool" ?disabled=${!this.chaptersSupported} @click=${() => this.openChapters(b)}>
-            Rozdziały
+            ${tr("lib.chapters")}
           </button>
           ${b.progressPercent
-            ? html`<button class="tool" @click=${() => this.onResetProgress(b)}>Od początku</button>`
+            ? html`<button class="tool" @click=${() => this.onResetProgress(b)}>${tr("lib.fromStart")}</button>`
             : nothing}
-          <button class="tool danger" @click=${() => this.onDelete(b)}>Usuń</button>
+          <button class="tool danger" @click=${() => this.onDelete(b)}>${tr("lib.delete")}</button>
         </div>
       </li>
     `;
@@ -353,9 +350,9 @@ export class LibraryPanel extends LitElement {
 
   private onDelete = async (b: Book) => {
     const extras = this.onReader
-      ? "\n\nOkładka, rozdziały i punkty zapisu trafią do archiwum na karcie. Wrócą, jeśli kiedyś dodasz tę samą książkę."
+      ? "\n\n" + tr("lib.confirmDelete.extras")
       : "";
-    if (!confirm(`Usunąć „${bookTitle(b)}” z czytnika?${extras}`)) return;
+    if (!confirm(tr("lib.confirmDelete", { title: bookTitle(b) }) + extras)) return;
     try {
       await deviceApi.deleteBook(b.name);
       coverCache.delete(b.name);
@@ -366,7 +363,7 @@ export class LibraryPanel extends LitElement {
   };
 
   private onResetProgress = async (b: Book) => {
-    if (!confirm(`Zacząć „${bookTitle(b)}” od początku?`)) return;
+    if (!confirm(tr("lib.confirmRestart", { title: bookTitle(b) }))) return;
     try {
       await deviceApi.setBookPosition(b.name, { wordIndex: 0 });
       await this.refresh(true);

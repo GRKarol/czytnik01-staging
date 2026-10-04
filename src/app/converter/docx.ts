@@ -1,6 +1,7 @@
 import mammoth from "mammoth";
 import { extractEventsFromElement } from "./text-formats";
 import type { ParsedBook } from "./rsvp";
+import { tr } from "../i18n/index";
 
 export async function parseDocx(file: File): Promise<ParsedBook> {
   const arrayBuffer = await file.arrayBuffer();
@@ -10,7 +11,7 @@ export async function parseDocx(file: File): Promise<ParsedBook> {
   const events = extractEventsFromElement(doc.body);
 
   if (!events.some((e) => e.kind === "paragraph")) {
-    throw new Error("Nie udało się wyodrębnić tekstu z dokumentu.");
+    throw new Error(tr("err.conv.docx"));
   }
 
   return {

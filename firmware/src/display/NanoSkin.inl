@@ -247,6 +247,18 @@ const char *DisplayManager::nanoPaletteName(uint8_t palette) {
   return kNanoPalettes[palette - 1].name;
 }
 
+bool DisplayManager::nanoPaletteSwatch(uint8_t palette, uint16_t &background, uint16_t &foreground,
+                                       uint16_t &accent) {
+  if (palette == kNanoPaletteClassic || palette > kNanoFixedPaletteCount) {
+    return false;
+  }
+  const NanoPaletteDef &def = kNanoPalettes[palette - 1];
+  background = def.colors[static_cast<uint8_t>(NanoRole::Background)];
+  foreground = def.colors[static_cast<uint8_t>(NanoRole::Foreground)];
+  accent = def.colors[static_cast<uint8_t>(NanoRole::Accent)];
+  return true;
+}
+
 void DisplayManager::setNanoPalette(uint8_t palette, bool ownAccent) {
   if (palette > kNanoFixedPaletteCount) {
     palette = kNanoPaletteClassic;

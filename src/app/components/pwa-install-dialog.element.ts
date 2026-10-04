@@ -1,5 +1,7 @@
 import { LitElement, css, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { tr } from "../i18n/index";
 import { dandelionIcon } from "./flower-icon";
 
 export interface BeforeInstallPromptEvent extends Event {
@@ -108,7 +110,7 @@ export class PwaInstallDialog extends LitElement {
     return html`
       <div class="backdrop" @click=${this.dismiss}>
         <div class="dialog" @click=${(e: Event) => e.stopPropagation()}>
-          <button class="close" @click=${this.dismiss} aria-label="Zamknij">✕</button>
+          <button class="close" @click=${this.dismiss} aria-label=${tr("common.close")}>✕</button>
           <div class="icon">${this.flowerIcon()}</div>
           <h2>Flower</h2>
           ${this.isIos ? this.renderIosInstructions() : this.renderChromePrompt()}
@@ -119,18 +121,18 @@ export class PwaInstallDialog extends LitElement {
 
   private renderChromePrompt() {
     return html`
-      <p>Czy chcesz pobrać aplikację Flower na swoje urządzenie?</p>
-      <button class="cta" @click=${this.handleInstallClick}>Zainstaluj</button>
+      <p>${tr("pwa.question")}</p>
+      <button class="cta" @click=${this.handleInstallClick}>${tr("onb.install.btn")}</button>
     `;
   }
 
   private renderIosInstructions() {
     return html`
-      <p>Aby zainstalować aplikację na iOS:</p>
+      <p>${tr("pwa.ios")}</p>
       <ol>
-        <li>Naciśnij ikonę <strong>Udostępnij</strong> (kwadrat ze strzałką na dole ekranu)</li>
-        <li>Przewiń w dół i wybierz <strong>„Dodaj do ekranu początkowego"</strong></li>
-        <li>Potwierdź przyciskiem <strong>„Dodaj"</strong></li>
+        <li>${unsafeHTML(tr("onb.ios.step1"))}</li>
+        <li>${unsafeHTML(tr("onb.ios.step2"))}</li>
+        <li>${unsafeHTML(tr("pwa.ios.step3"))}</li>
       </ol>
     `;
   }

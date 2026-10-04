@@ -1,7 +1,8 @@
-import { LitElement, css, html, svg } from "lit";
+import { LitElement, css, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { keyed } from "lit/directives/keyed.js";
-import { BRAND_NAME, DEVICE_LABEL, APP_VERSION } from "../shared/config";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { BRAND_NAME } from "../shared/config";
 import type { DeviceLink } from "./device/device-link";
 import { WifiLink, helloDevice } from "./device/wifi-link";
 import {
@@ -17,7 +18,6 @@ import { BluetoothLink } from "./device/bluetooth-link";
 import { SerialLink } from "./device/serial-link";
 import { dandelionIcon } from "./components/flower-icon";
 import "./components/converter-panel.element";
-import "./components/updates-panel.element";
 import "./components/library-panel.element";
 import "./components/settings-panel.element";
 import "./components/onboarding.element";
@@ -28,83 +28,25 @@ import {
   deviceApi,
   onDeviceApiChange,
   setDeviceApi,
+  type Book,
+  type DeviceInfo,
   type DeviceSettings,
   type PluginInfo,
 } from "./device/api";
 import { HttpDeviceApi } from "./device/http-api";
 import { getTutorialStatus } from "./onboarding/onboarding-store";
+import { followReaderLang, getLang, onLangChange, tr } from "./i18n/index";
+import { deviceLangToSupported } from "./i18n/lang-map";
+import { icons } from "./ui/icons";
+import { sharedStyles, themeTokens } from "./ui/theme";
+import { applyLook, lookFromSettings, saveLook, savedLook } from "./ui/reader-look";
+import { decodePicture, readerCoverColor, readerInitials } from "./books/pictures";
 
-type View = "home" | "library" | "converter" | "plugins" | "updates" | "settings";
+type View = "home" | "library" | "converter" | "plugins" | "more";
 type Transport = "wifi" | "bluetooth" | "serial";
 
-const iconHome = (s = 24) => svg`
-  <svg width=${s} height=${s} viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M3 11l9-8 9 8v10a2 2 0 0 1-2 2h-4v-7H10v7H5a2 2 0 0 1-2-2z"/>
-  </svg>
-`;
-const iconBook = (s = 24) => svg`
-  <svg width=${s} height=${s} viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M4 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H4z"/>
-    <path d="M20 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/>
-  </svg>
-`;
-const iconConvert = (s = 24) => svg`
-  <svg width=${s} height=${s} viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M5 9h11l-3-3"/>
-    <path d="M19 15H8l3 3"/>
-  </svg>
-`;
-const iconPlug = (s = 24) => svg`
-  <svg width=${s} height=${s} viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M9 7V3M15 7V3"/>
-    <rect x="7" y="7" width="10" height="8" rx="2"/>
-    <path d="M12 15v4"/>
-  </svg>
-`;
-const iconUpdate = (s = 24) => svg`
-  <svg width=${s} height=${s} viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M21 12a9 9 0 1 1-3-6.7"/>
-    <path d="M21 4v5h-5"/>
-  </svg>
-`;
-const iconGear = (s = 24) => svg`
-  <svg width=${s} height=${s} viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="12" cy="12" r="3"/>
-    <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.5-2.4.9a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.4a7 7 0 0 0-2 1.2L5 5.7l-2 3.5 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.5 2.4-.9a7 7 0 0 0 2 1.2L10 21h4l.5-2.4a7 7 0 0 0 2-1.2l2.4.9 2-3.5-2-1.6c.1-.4.1-.8.1-1.2z"/>
-  </svg>
-`;
-const iconWifi = (s = 28) => svg`
-  <svg width=${s} height=${s} viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M2 8.5a17 17 0 0 1 20 0"/>
-    <path d="M5 12a13 13 0 0 1 14 0"/>
-    <path d="M8.5 15.5a8 8 0 0 1 7 0"/>
-    <circle cx="12" cy="19" r="1.2" fill="currentColor"/>
-  </svg>
-`;
-const iconBt = (s = 28) => svg`
-  <svg width=${s} height=${s} viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M7 7l10 10-5 4V3l5 4L7 17"/>
-  </svg>
-`;
-const iconUsb = (s = 28) => svg`
-  <svg width=${s} height=${s} viewBox="0 0 24 24" fill="none"
-       stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="12" cy="4" r="1.5"/>
-    <path d="M12 5.5V20"/>
-    <path d="M12 14l-4-4h3V8"/>
-    <path d="M12 12l4-2h-3V8"/>
-    <rect x="9" y="20" width="6" height="2" rx="1"/>
-  </svg>
-`;
-const iconFlower = dandelionIcon;
+/** Static strings with <b>/<code> markup only, never user data. */
+const trHtml = (key: string) => unsafeHTML(tr(key));
 
 @customElement("czytnik-app")
 export class CzytnikApp extends LitElement {
@@ -118,8 +60,8 @@ export class CzytnikApp extends LitElement {
   @state() private showTutorial = false;
   @state() private readerFirmware = "";
   @state() private joinUnsupported = false;
-  // QR fallback: offered once "Połącz z czytnikiem" has gone 20 s without
-  // the phone finding the reader's network.
+  // QR fallback: offered once "Connect to reader" has gone 20 s without the
+  // phone finding the reader's network.
   @state() private qrFallbackVisible = false;
   @state() private scanningQr = false;
   private qrFallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -131,32 +73,54 @@ export class CzytnikApp extends LitElement {
   @state() private rssBusy = false;
   @state() private newFeedUrl = "";
 
+  // Start tab once connected: the open book and the reader's state.
+  @state() private books: Book[] = [];
+  @state() private currentCover = "";
+  @state() private info: DeviceInfo | null = null;
+
   private link: DeviceLink | null = null;
   private unsubApi: (() => void) | null = null;
+  private unsubLang: (() => void) | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.refreshDevMode();
-    this.unsubApi = onDeviceApiChange(() => this.refreshDevMode());
-    this.addEventListener("device-settings-changed", () => this.refreshDevMode());
+    applyLook(this, savedLook());
+    this.refreshFromReader();
+    this.unsubApi = onDeviceApiChange(() => this.refreshFromReader());
+    this.unsubLang = onLangChange(() => this.requestUpdate());
+    this.addEventListener("device-settings-changed", this.onSettingsChanged as EventListener);
     this.addEventListener("tutorial-close", this.handleTutorialClose);
     this.addEventListener("restart-tutorial", this.handleRestartTutorial);
-    // Handle Web Share Target: if we were opened via share intent with a file
+    this.addEventListener("open-view", this.onOpenView as EventListener);
     this.handleSharedFile();
-    // Already on the reader's WiFi (or coming back from WiFi settings):
+    // Already on the reader's Wi-Fi (or back from the Wi-Fi settings):
     // connect without asking.
     void this.autoConnect();
     document.addEventListener("visibilitychange", this.onVisibilityChange);
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.stopHeartbeat();
+    this.unsubApi?.();
+    this.unsubLang?.();
+    this.removeEventListener("device-settings-changed", this.onSettingsChanged as EventListener);
+    this.removeEventListener("tutorial-close", this.handleTutorialClose);
+    this.removeEventListener("restart-tutorial", this.handleRestartTutorial);
+    this.removeEventListener("open-view", this.onOpenView as EventListener);
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
   }
 
   private onVisibilityChange = () => {
     if (document.visibilityState === "visible") void this.autoConnect();
   };
 
+  private onOpenView = (e: CustomEvent<View>) => this.switchView(e.detail);
+
   /**
    * Silent check for a reader at 192.168.4.1. The native app pins itself to
-   * the current WiFi first (without that Android may send the request over
+   * the current Wi-Fi first (without that Android may send the request over
    * mobile data) and lets go again when nobody answers.
    */
   private autoConnect = async () => {
@@ -173,15 +137,6 @@ export class CzytnikApp extends LitElement {
     await this.connect();
   };
 
-  disconnectedCallback(): void {
-    super.disconnectedCallback();
-    this.stopHeartbeat();
-    this.unsubApi?.();
-    this.removeEventListener("tutorial-close", this.handleTutorialClose);
-    this.removeEventListener("restart-tutorial", this.handleRestartTutorial);
-    document.removeEventListener("visibilitychange", this.onVisibilityChange);
-  }
-
   private handleTutorialClose = () => {
     this.showTutorial = false;
   };
@@ -190,44 +145,79 @@ export class CzytnikApp extends LitElement {
     this.showTutorial = true;
   };
 
-  /** Sprawdza w API czy dev mode jest włączony — odświeża badge w header. */
-  private async refreshDevMode(): Promise<void> {
-    try {
-      const s: DeviceSettings = await deviceApi.getSettings();
-      this.devMode = s.devMode;
-    } catch {
-      this.devMode = false;
+  private onSettingsChanged = (e: CustomEvent<DeviceSettings | undefined>) => {
+    if (e.detail) this.adoptSettings(e.detail);
+    else void this.refreshFromReader();
+  };
+
+  /** Language, colors and the DEV badge follow the reader's settings. */
+  private adoptSettings(s: DeviceSettings): void {
+    this.devMode = s.devMode;
+    if (!this.onReader) return;
+    followReaderLang(deviceLangToSupported(s.language));
+    const look = lookFromSettings(s);
+    if (look) {
+      saveLook(look);
+      applyLook(this, look);
     }
   }
 
-  /** Handle Web Share Target: read shared file from IndexedDB and upload */
+  private async refreshFromReader(): Promise<void> {
+    try {
+      this.adoptSettings(await deviceApi.getSettings());
+    } catch {
+      this.devMode = false;
+    }
+    if (this.onReader) void this.loadOverview();
+  }
+
+  private get onReader(): boolean {
+    return deviceApi.current instanceof HttpDeviceApi;
+  }
+
+  /** The open book (with its cover) and the reader's battery and card. */
+  private async loadOverview(): Promise<void> {
+    try {
+      this.books = await deviceApi.listBooks();
+    } catch {
+      /* the Start card shows what it has */
+    }
+    try {
+      this.info = await deviceApi.getDeviceInfo();
+    } catch {
+      this.info = null;
+    }
+    const current = this.books.find((b) => b.current);
+    this.currentCover = "";
+    if (current?.hasCover) {
+      try {
+        const blob = await deviceApi.getBookPicture(current.name, "cover");
+        const canvas = blob ? await decodePicture(blob) : null;
+        if (canvas) this.currentCover = canvas.toDataURL();
+      } catch {
+        /* the colored default stays */
+      }
+    }
+  }
+
+  /** Web Share Target: a file shared to the app goes to the reader. */
   private async handleSharedFile(): Promise<void> {
     const params = new URLSearchParams(window.location.search);
     const sharedId = params.get("shared");
     if (!sharedId) return;
-
-    // Clean the URL
     const url = new URL(window.location.href);
     url.searchParams.delete("shared");
     window.history.replaceState(null, "", url.toString());
-
-    // Switch to library view
     this.view = "library";
-
     try {
       const entry = await this.readSharedFileFromDb(sharedId);
       if (!entry) return;
-
       const file = entry.file as File;
       const name = (entry.name as string) || file.name;
-
-      // Upload via deviceApi (mock or real depending on connection)
       await deviceApi.uploadBook(file, name);
-
-      // Clean up from IndexedDB
       await this.removeSharedFileFromDb(sharedId);
     } catch (err) {
-      this.error = `Nie udało się wgrać udostępnionego pliku: ${err instanceof Error ? err.message : String(err)}`;
+      this.error = tr("share.err", { error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -236,15 +226,11 @@ export class CzytnikApp extends LitElement {
       const request = indexedDB.open("flower-share", 1);
       request.onupgradeneeded = () => {
         const db = request.result;
-        if (!db.objectStoreNames.contains("pending-files")) {
-          db.createObjectStore("pending-files");
-        }
+        if (!db.objectStoreNames.contains("pending-files")) db.createObjectStore("pending-files");
       };
       request.onsuccess = () => {
         const db = request.result;
-        const tx = db.transaction("pending-files", "readonly");
-        const store = tx.objectStore("pending-files");
-        const get = store.get(id);
+        const get = db.transaction("pending-files", "readonly").objectStore("pending-files").get(id);
         get.onsuccess = () => {
           db.close();
           resolve(get.result ?? null);
@@ -278,53 +264,49 @@ export class CzytnikApp extends LitElement {
     });
   }
 
+  // ─── Render ──────────────────────────────────────────────────────────────
+
   render() {
-    return html`
-      <onboarding-wizard></onboarding-wizard>
-      <pwa-install-dialog></pwa-install-dialog>
-      ${this.showTutorial ? html`<tutorial-wizard></tutorial-wizard>` : ""}
+    // Keyed on the language: a switch rebuilds every screen in the new one.
+    return keyed(
+      getLang(),
+      html`
+        <onboarding-wizard></onboarding-wizard>
+        <pwa-install-dialog></pwa-install-dialog>
+        ${this.showTutorial ? html`<tutorial-wizard></tutorial-wizard>` : nothing}
 
-      <header>
-        <div class="brand">
-          <span class="flower">${iconFlower(28)}</span>
-          <span>
+        <header>
+          <button class="brand" @click=${() => this.switchView("home")}>
+            <span class="mark">${dandelionIcon(26)}</span>
             <strong>${BRAND_NAME}</strong>
-            <small>v${APP_VERSION}</small>
-          </span>
-        </div>
-        <div class="badges">
-          ${this.devMode ? html`<span class="badge dev">DEV</span>` : ""}
-          <div class=${`pill ${this.connected ? "ok" : ""}`}>
-            <span class="dot"></span>
-            ${this.connected
-              ? `Połączono · ${this.link?.transport.label}${this.readerFirmware ? ` · ${this.readerFirmware}` : ""}`
-              : "Brak połączenia"}
+          </button>
+          <div class="badges">
+            ${this.devMode ? html`<span class="badge dev">${tr("status.dev")}</span>` : nothing}
+            <span class=${this.connected ? "status on" : "status"}>
+              <span class="dot"></span>
+              ${this.connected ? tr("status.connected") : tr("status.offline")}
+            </span>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main><div class="view-anim">${keyed(this.view, this.renderView())}</div></main>
+        <main><div class="view">${keyed(this.view, this.renderView())}</div></main>
 
-      <nav>
-        ${this.navButton("home", "Start", iconHome())}
-        ${this.navButton("library", "Książki", iconBook())}
-        ${this.navButton("converter", "Konwerter", iconConvert())}
-        ${this.navButton("plugins", "Pluginy", iconPlug())}
-        ${this.navButton("updates", "Aktualizacje", iconUpdate())}
-        ${this.navButton("settings", "Więcej", iconGear())}
-      </nav>
-    `;
+        <nav>
+          ${this.navButton("home", tr("nav.home"), icons.home())}
+          ${this.navButton("library", tr("nav.books"), icons.books())}
+          ${this.navButton("converter", tr("nav.convert"), icons.convert())}
+          ${this.navButton("plugins", tr("nav.plugins"), icons.plugins())}
+          ${this.navButton("more", tr("nav.more"), icons.more())}
+        </nav>
+      `,
+    );
   }
 
-  private navButton(v: View, label: string, ico: unknown, disabled = false) {
+  private navButton(v: View, label: string, ico: unknown) {
     return html`
-      <button
-        class=${this.view === v ? "active" : ""}
-        ?disabled=${disabled}
-        @click=${() => this.switchView(v)}
-      >
+      <button class=${this.view === v ? "on" : ""} @click=${() => this.switchView(v)}>
         <span class="ico">${ico}</span>
-        ${label}
+        <span class="label">${label}</span>
       </button>
     `;
   }
@@ -332,6 +314,7 @@ export class CzytnikApp extends LitElement {
   private switchView(v: View): void {
     this.view = v;
     if (v === "plugins") void this.loadPlugins();
+    if (v === "home" && this.onReader) void this.loadOverview();
   }
 
   private renderView() {
@@ -339,307 +322,233 @@ export class CzytnikApp extends LitElement {
       case "home":
         return this.renderHome();
       case "library":
-        return this.renderLibrary();
+        return html`<h1>${tr("nav.books")}</h1><library-panel></library-panel>`;
       case "converter":
-        return this.renderConverter();
+        return html`<h1>${tr("nav.convert")}</h1><converter-panel></converter-panel>`;
       case "plugins":
         return this.renderPlugins();
-      case "updates":
-        return this.renderUpdates();
-      case "settings":
-        return this.renderSettings();
+      case "more":
+        return html`<h1>${tr("nav.more")}</h1>
+          <settings-panel .readerFirmware=${this.readerFirmware} .connection=${this.link?.transport.label ?? ""}></settings-panel>`;
     }
   }
 
-  // ─── Home ──────────────────────────────────────────────────────────────────
+  // ─── Start ───────────────────────────────────────────────────────────────
 
   private renderHome() {
     return html`
-      <section class="hero">
-        <div class="hero-flower">${iconFlower(96)}</div>
-        <h2>Cześć!</h2>
-        <p>
-          To aplikacja Twojego ${DEVICE_LABEL.toLowerCase()}a <strong>${BRAND_NAME}</strong>.
-          Wysyłaj książki, instaluj pluginy i aktualizuj urządzenie — wszystko bezprzewodowo.
-        </p>
-      </section>
-
-      ${!this.connected ? this.renderConnectChoice() : this.renderConnectedActions()}
-      ${this.error ? html`<p class="error">${this.error}</p>` : ""}
+      ${!this.connected ? this.renderConnectChoice() : this.renderConnectedHome()}
+      ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
     `;
   }
 
   private renderConnectChoice() {
     if (this.chosenTransport) return this.renderConnecting();
-
     const btSupported = BluetoothLink.isSupported();
     const serialSupported = SerialLink.isSupported();
-
     return html`
-      <section class="card">
-        <h3>Połącz urządzenie</h3>
-        <p class="muted">Wybierz sposób połączenia z ${DEVICE_LABEL.toLowerCase()}em.</p>
-
-        <button class="choice" @click=${() => this.pickTransport("wifi")}>
-          <span class="choice-ico">${iconWifi()}</span>
-          <span class="choice-body">
-            <strong>WiFi</strong>
-            <span>Polecane. Książki, okładki, rozdziały, ustawienia i aktualizacje.</span>
-          </span>
-        </button>
-
-        <button
-          class="choice"
-          ?disabled=${!btSupported}
-          @click=${() => this.pickTransport("bluetooth")}
-        >
-          <span class="choice-ico">${iconBt()}</span>
-          <span class="choice-body">
-            <strong>Bluetooth</strong>
-            <span>
-              ${btSupported
-                ? "Bonus dla Androida. Idealny do drobnych komend."
-                : "Niewspierany w tej przeglądarce (iOS nie obsługuje Web Bluetooth)."}
-            </span>
-          </span>
-        </button>
-
-        <button class="link-button" @click=${() => (this.showAdvanced = !this.showAdvanced)}>
-          ${this.showAdvanced ? "Schowaj tryb zaawansowany" : "Tryb zaawansowany"}
-        </button>
-
-        ${this.showAdvanced
-          ? html`
-              <button
-                class="choice subtle"
-                ?disabled=${!serialSupported}
-                @click=${() => this.pickTransport("serial")}
-              >
-                <span class="choice-ico">${iconUsb()}</span>
-                <span class="choice-body">
-                  <strong>USB</strong>
-                  <span>
-                    ${serialSupported
-                      ? "Diagnostyka / serwis. Wymaga kabla USB-C i Chrome/Edge na desktopie."
-                      : "Web Serial niewspierany — użyj Chrome lub Edge na desktopie."}
-                  </span>
-                </span>
-              </button>
-            `
-          : ""}
+      <section class="hero">
+        <span class="hero-mark">${dandelionIcon(72)}</span>
+        <h2>${tr("home.offline.title")}</h2>
+        <p>${tr("home.offline.lead")}</p>
       </section>
+
+      <div class="list">
+        <button class="item choice" @click=${() => this.pickTransport("wifi")}>
+          <span class="tile-ico">${icons.wifi(22)}</span>
+          <span class="label">
+            <span class="title">Wi-Fi <em class="pill">${tr("home.recommended")}</em></span>
+            <small>${tr("home.wifi.desc")}</small>
+          </span>
+          <span class="chev">${icons.chevronRight()}</span>
+        </button>
+        <button class="item choice" ?disabled=${!btSupported} @click=${() => this.pickTransport("bluetooth")}>
+          <span class="tile-ico">${icons.bluetooth(22)}</span>
+          <span class="label">
+            <span class="title">Bluetooth</span>
+            <small>${btSupported ? tr("home.bt.desc") : tr("home.bt.unsupported")}</small>
+          </span>
+          <span class="chev">${icons.chevronRight()}</span>
+        </button>
+        ${this.showAdvanced
+          ? html`<button class="item choice" ?disabled=${!serialSupported} @click=${() => this.pickTransport("serial")}>
+              <span class="tile-ico">${icons.usb(22)}</span>
+              <span class="label">
+                <span class="title">USB</span>
+                <small>${serialSupported ? tr("home.usb.desc") : tr("home.usb.unsupported")}</small>
+              </span>
+              <span class="chev">${icons.chevronRight()}</span>
+            </button>`
+          : nothing}
+      </div>
+      <button class="btn quiet small center" @click=${() => (this.showAdvanced = !this.showAdvanced)}>
+        ${this.showAdvanced ? tr("home.advanced.hide") : tr("home.advanced.show")}
+      </button>
     `;
   }
 
   private renderConnecting() {
-    const label =
-      this.chosenTransport === "wifi"
-        ? "WiFi"
-        : this.chosenTransport === "bluetooth"
-          ? "Bluetooth"
-          : "USB";
+    const label = this.chosenTransport === "wifi" ? "Wi-Fi" : this.chosenTransport === "bluetooth" ? "Bluetooth" : "USB";
     const nativeJoin = this.chosenTransport === "wifi" && isNativeApp() && !this.joinUnsupported;
     return html`
       <section class="card">
-        <h3>Łączenie przez ${label}…</h3>
+        <h2 class="card-title">${tr("connect.title", { method: label })}</h2>
         ${this.chosenTransport === "wifi"
           ? html`
               <ol class="steps">
-                <li>
-                  Na czytniku otwórz <strong>Urządzenie → Aplikacja</strong>. Czytnik włączy
-                  swoją sieć <code>Flower-…</code> i pokaże kod QR.
-                </li>
+                <li>${trHtml("connect.step.open")}</li>
                 ${nativeJoin
-                  ? html`<li>
-                        Naciśnij <strong>„Połącz z czytnikiem"</strong> i wybierz sieć
-                        <code>Flower-…</code> w okienku telefonu.
-                      </li>
+                  ? html`<li>${trHtml("connect.step.join")}</li>
                       ${this.qrFallbackVisible
                         ? html`<li class="callout">
-                            Telefon nie widzi sieci czytnika? Zeskanuj kod QR z ekranu
-                            czytnika, aplikacja połączy się z tą konkretną siecią.
-                            <button
-                              class="cta ghost small"
-                              ?disabled=${this.scanningQr}
-                              @click=${this.openQrScanner}
-                            >
-                              Zeskanuj kod QR
+                            <span>${tr("connect.qr.fallback")}</span>
+                            <button class="btn small" ?disabled=${this.scanningQr} @click=${this.openQrScanner}>
+                              ${tr("connect.qr.scan")}
                             </button>
                           </li>`
-                        : ""}`
+                        : nothing}`
                   : html`
                       <li>
-                        Zeskanuj kod QR aparatem albo wybierz sieć <code>Flower-…</code> w
-                        ustawieniach WiFi telefonu.
-                        <button class="cta ghost small" @click=${() => void openWifiSettings()}>
-                          Otwórz ustawienia WiFi
-                        </button>
+                        <span>${trHtml("connect.step.manual")}</span>
+                        <button class="btn small" @click=${() => void openWifiSettings()}>${tr("connect.openWifi")}</button>
                       </li>
-                      <li class="callout">
-                        Telefon może ostrzec „Brak internetu". To normalne, czytnik ma tylko
-                        lokalną sieć. Wybierz <strong>„Zostań połączony"</strong>, inaczej telefon
-                        sam przeskoczy na inną sieć.
-                      </li>
-                      <li>Wróć tutaj. Aplikacja połączy się sama albo po „Sprawdź połączenie".</li>
+                      <li class="callout"><span>${trHtml("connect.noInternet")}</span></li>
+                      <li>${trHtml("connect.return")}</li>
                     `}
               </ol>
             `
-          : this.chosenTransport === "bluetooth"
-            ? html`<p class="muted">Wybierz urządzenie w okienku przeglądarki.</p>`
-            : html`<p class="muted">Wybierz port USB w okienku przeglądarki.</p>`}
-
+          : html`<p class="muted">
+              ${this.chosenTransport === "bluetooth" ? tr("connect.pickBt") : tr("connect.pickUsb")}
+            </p>`}
         <div class="row">
-          <button
-            class="cta"
-            ?disabled=${this.connecting}
-            @click=${nativeJoin ? this.joinAndConnect : this.connect}
-          >
-            ${this.connecting
-              ? "Łączenie…"
-              : nativeJoin
-                ? "Połącz z czytnikiem"
-                : "Sprawdź połączenie"}
+          <button class="btn quiet" @click=${this.cancelChoice}>${tr("common.back")}</button>
+          <button class="btn primary" ?disabled=${this.connecting} @click=${nativeJoin ? this.joinAndConnect : this.connect}>
+            ${this.connecting ? tr("connect.connecting") : nativeJoin ? tr("connect.join") : tr("connect.check")}
           </button>
-          <button class="cta ghost" @click=${this.cancelChoice}>Wróć</button>
         </div>
         ${this.scanningQr
-          ? html`<qr-scanner
-              @qr-result=${this.onQrResult}
-              @qr-cancel=${() => (this.scanningQr = false)}
-            ></qr-scanner>`
-          : ""}
+          ? html`<qr-scanner @qr-result=${this.onQrResult} @qr-cancel=${() => (this.scanningQr = false)}></qr-scanner>`
+          : nothing}
       </section>
     `;
   }
 
-  private renderConnectedActions() {
+  private renderConnectedHome() {
+    const current = this.books.find((b) => b.current);
+    const title = current ? current.title || current.name.replace(/^.*\//, "").replace(/\.[^.]+$/, "") : "";
+    const percent = current?.progressPercent ?? 0;
     return html`
-      <section class="card">
-        <h3>Co robimy?</h3>
-        <div class="grid">
-          <button class="tile" @click=${() => (this.view = "library")}>
-            <span class="tile-ico">${iconBook(28)}</span>
-            <strong>Książki</strong>
-            <span>Wyślij nowe, zarządzaj biblioteką.</span>
-          </button>
-          <button class="tile" @click=${() => (this.view = "converter")}>
-            <span class="tile-ico">${iconConvert(28)}</span>
-            <strong>Konwerter</strong>
-            <span>EPUB · PDF · MOBI · TXT → .rsvp</span>
-          </button>
-          <button class="tile" @click=${() => this.switchView("plugins")}>
-            <span class="tile-ico">${iconPlug(28)}</span>
-            <strong>Pluginy</strong>
-            <span>Klepsydra, dyktafon i więcej.</span>
-          </button>
-          <button class="tile" @click=${() => (this.view = "updates")}>
-            <span class="tile-ico">${iconUpdate(28)}</span>
-            <strong>Aktualizacje</strong>
-            <span>Sprawdź nowe wersje firmware.</span>
-          </button>
-        </div>
-        <button class="cta ghost" @click=${this.disconnect}>Rozłącz</button>
+      <section class="now">
+        <span class="section-title">${tr("home.reading")}</span>
+        ${current
+          ? html`<button class="now-card" @click=${() => this.switchView("library")}>
+              <span
+                class="cover"
+                style=${this.currentCover
+                  ? `background-image:url(${this.currentCover})`
+                  : `background:${readerCoverColor(current.name)}`}
+                >${this.currentCover ? nothing : readerInitials(title)}</span
+              >
+              <span class="now-text">
+                <strong>${title}</strong>
+                <small>${current.author || tr("common.unknownAuthor")}</small>
+                <span class="progress"><span style="width:${percent}%"></span></span>
+                <small class="pct">${tr("home.read", { n: percent })}</small>
+              </span>
+            </button>`
+          : html`<p class="notice">${tr("home.noBook")}</p>`}
       </section>
+
+      <section class="tiles">
+        ${this.tile(icons.upload(24), tr("home.tile.send"), tr("home.tile.send.desc"), "library")}
+        ${this.tile(icons.convert(24), tr("nav.convert"), tr("home.tile.convert.desc"), "converter")}
+        ${this.tile(icons.books(24), tr("home.tile.library"), tr("home.tile.library.desc", { n: this.books.length }), "library")}
+        ${this.tile(icons.more(24), tr("home.tile.settings"), tr("home.tile.settings.desc"), "more")}
+      </section>
+
+      ${this.info
+        ? html`<section class="device">
+            <span class="section-title">${tr("home.device")}</span>
+            <div class="stats">
+              <div><span>${icons.battery(18)}</span><strong>${this.info.batteryPercent}%</strong><small>${tr("home.battery")}</small></div>
+              <div>
+                <span>${icons.sd(18)}</span><strong>${formatKb(this.info.sdFreeKb)}</strong>
+                <small>${tr("home.cardFree")}</small>
+              </div>
+              <div><span>${icons.chip(18)}</span><strong>${this.info.firmwareVersion || this.readerFirmware}</strong><small>${tr("home.firmware")}</small></div>
+            </div>
+          </section>`
+        : nothing}
+
+      <button class="btn quiet center" @click=${this.disconnect}>${tr("home.disconnect")}</button>
     `;
   }
 
-  // ─── Pozostałe ekrany — szkielety, logika idzie w kolejnych rundach ─────
-
-  private renderLibrary() {
-    return html`
-      <section class="card">
-        <h3>${iconBook(22)} Książki</h3>
-        <library-panel></library-panel>
-      </section>
-    `;
+  private tile(icon: unknown, title: string, desc: string, view: View) {
+    return html`<button class="tile" @click=${() => this.switchView(view)}>
+      <span class="tile-ico">${icon}</span>
+      <strong>${title}</strong>
+      <small>${desc}</small>
+    </button>`;
   }
 
-  private renderConverter() {
-    return html`
-      <section class="card">
-        <h3>${iconConvert(22)} Konwerter</h3>
-        <p class="muted">
-          Wybierz plik z telefonu — przekonwertujemy go na format
-          <code>.rsvp</code> w przeglądarce, bez wysyłania nigdzie.
-        </p>
-        <converter-panel></converter-panel>
-      </section>
-    `;
-  }
+  // ─── Plugins ─────────────────────────────────────────────────────────────
 
   private renderPlugins() {
     const rss = this.plugins.find((p) => p.id === "rss");
     return html`
-      <section class="card">
-        <h3>${iconPlug(22)} Pluginy</h3>
-        <p class="muted">
-          Dodatkowe funkcje wgrane na urządzeniu. Włączaj i wyłączaj je na czytniku, w
-          Ustawieniach → Pluginy.
-        </p>
-        ${this.pluginsError ? html`<p class="error">${this.pluginsError}</p>` : ""}
-        ${!this.connected
-          ? html`<p class="muted">Połącz się z czytnikiem, żeby zobaczyć realny stan pluginów.</p>`
-          : this.pluginsLoading
-            ? html`<p class="muted">Wczytuję…</p>`
-            : html`
-                <div class="plugin-list">
-                  ${this.plugins.length === 0
-                    ? html`<p class="muted">Czytnik nie zgłosił żadnych pluginów.</p>`
-                    : this.plugins.map((p) => this.pluginCard(p.name, p.active))}
-                </div>
-
-                ${rss?.active ? this.renderRssEditor() : ""}
-              `}
-      </section>
-    `;
-  }
-
-  private pluginCard(name: string, active: boolean) {
-    const badge = active ? "Aktywny" : "Wyłączony";
-    return html`
-      <div class="plugin">
-        <span class="plugin-ico">${iconFlower(36)}</span>
-        <div class="plugin-body">
-          <strong>${name}</strong>
-        </div>
-        <span class=${`badge ${active ? "ok" : ""}`}>${badge}</span>
-      </div>
+      <h1>${tr("nav.plugins")}</h1>
+      <p class="muted">${tr("plugins.lead")}</p>
+      ${this.pluginsError ? html`<p class="error">${this.pluginsError}</p>` : nothing}
+      ${!this.connected
+        ? html`<p class="notice">${tr("plugins.offline")}</p>`
+        : this.pluginsLoading
+          ? html`<p class="muted">${tr("common.loading")}</p>`
+          : html`
+              ${this.plugins.length === 0
+                ? html`<p class="notice">${tr("plugins.none")}</p>`
+                : html`<div class="list">
+                    ${this.plugins.map(
+                      (p) => html`<div class="item">
+                        <span class="tile-ico">${icons.plugins(20)}</span>
+                        <span class="label">
+                          <span class="title">${p.name}</span>
+                          ${p.builtin ? html`<small>${tr("plugins.builtin")}</small>` : nothing}
+                        </span>
+                        <span class=${p.active ? "pill on" : "pill"}>
+                          ${p.active ? tr("plugins.active") : tr("plugins.inactive")}
+                        </span>
+                      </div>`,
+                    )}
+                  </div>`}
+              ${rss?.active ? this.renderRssEditor() : nothing}
+            `}
     `;
   }
 
   private renderRssEditor() {
     return html`
-      <div class="rss-editor">
-        <strong>Kanały RSS</strong>
+      <span class="section-title">${tr("rss.title")}</span>
+      <div class="list">
         ${this.rssFeeds.length === 0
-          ? html`<p class="muted">Brak dodanych kanałów.</p>`
-          : html`<ul class="rss-list">
-              ${this.rssFeeds.map(
-                (url, i) => html`
-                  <li>
-                    <span>${url}</span>
-                    <button
-                      class="del"
-                      ?disabled=${this.rssBusy}
-                      @click=${() => this.removeRssFeed(i)}
-                      aria-label="Usuń kanał"
-                    >
-                      ✕
-                    </button>
-                  </li>
-                `,
-              )}
-            </ul>`}
-        <div class="rss-add">
+          ? html`<div class="item"><span class="label"><small>${tr("rss.none")}</small></span></div>`
+          : this.rssFeeds.map(
+              (url, i) => html`<div class="item">
+                <span class="label"><span class="feed">${url}</span></span>
+                <button class="icon-btn" ?disabled=${this.rssBusy} @click=${() => this.removeRssFeed(i)} aria-label=${tr("rss.remove")}>
+                  ${icons.close(18)}
+                </button>
+              </div>`,
+            )}
+        <div class="item">
           <input
+            class="input"
             type="url"
-            placeholder="https://przyklad.pl/rss.xml"
+            placeholder="https://example.com/rss.xml"
             .value=${this.newFeedUrl}
             @input=${(e: Event) => (this.newFeedUrl = (e.target as HTMLInputElement).value)}
           />
-          <button class="cta ghost small" ?disabled=${this.rssBusy} @click=${this.addRssFeed}>
-            Dodaj
-          </button>
+          <button class="btn small primary" ?disabled=${this.rssBusy} @click=${this.addRssFeed}>${tr("rss.add")}</button>
         </div>
       </div>
     `;
@@ -678,8 +587,7 @@ export class CzytnikApp extends LitElement {
     this.rssBusy = true;
     this.pluginsError = "";
     try {
-      const next = this.rssFeeds.filter((_, i) => i !== index);
-      this.rssFeeds = await deviceApi.setRssFeeds(next);
+      this.rssFeeds = await deviceApi.setRssFeeds(this.rssFeeds.filter((_, i) => i !== index));
     } catch (err) {
       this.pluginsError = err instanceof Error ? err.message : String(err);
     } finally {
@@ -687,33 +595,7 @@ export class CzytnikApp extends LitElement {
     }
   };
 
-  private renderUpdates() {
-    return html`
-      <section class="card">
-        <h3>${iconUpdate(22)} Aktualizacje</h3>
-        <updates-panel .currentFw=${this.readerFirmware}></updates-panel>
-      </section>
-    `;
-  }
-
-  private renderSettings() {
-    return html`
-      <section class="card">
-        <h3>${iconGear(22)} Więcej</h3>
-        <settings-panel></settings-panel>
-        <ul class="settings-list">
-          <li><strong>Wersja aplikacji</strong><span>${APP_VERSION}</span></li>
-          <li><strong>Marka</strong><span>${BRAND_NAME}</span></li>
-          <li>
-            <strong>Połączenie</strong>
-            <span>${this.link?.transport.label ?? "—"}</span>
-          </li>
-        </ul>
-      </section>
-    `;
-  }
-
-  // ─── Logika połączenia ─────────────────────────────────────────────────────
+  // ─── Connection ──────────────────────────────────────────────────────────
 
   private pickTransport(t: Transport) {
     this.chosenTransport = t;
@@ -737,7 +619,7 @@ export class CzytnikApp extends LitElement {
 
   /**
    * Android 10+: the system dialog joins "Flower-…" and pins the app to it,
-   * no trip to the WiFi settings. Older Android falls back to the manual
+   * no trip to the Wi-Fi settings. Older Android falls back to the manual
    * steps.
    */
   private joinAndConnect = async () => {
@@ -762,8 +644,7 @@ export class CzytnikApp extends LitElement {
       return;
     }
     if (!joined.connected) {
-      this.error =
-        "Telefon nie połączył się z siecią czytnika. Sprawdź, czy na czytniku jest otwarty ekran Aplikacja, i spróbuj jeszcze raz.";
+      this.error = tr("connect.err.join");
       return;
     }
     this.resetQrFallback();
@@ -779,14 +660,14 @@ export class CzytnikApp extends LitElement {
     this.scanningQr = false;
     const network = readerNetworkFromQr(event.detail.text);
     if (!network) {
-      this.error = "To nie jest kod czytnika Flower. Zeskanuj kod z ekranu Urządzenie → Aplikacja.";
+      this.error = tr("connect.err.qr");
       return;
     }
     this.connecting = true;
     const joined = await joinNetworkFromQr(network.ssid, network.password);
     this.connecting = false;
     if (!joined.connected) {
-      this.error = `Nie udało się połączyć z siecią ${network.ssid}. Sprawdź, czy czytnik ma otwarty ekran Aplikacja, i spróbuj jeszcze raz.`;
+      this.error = tr("connect.err.qrJoin", { ssid: network.ssid });
       return;
     }
     this.resetQrFallback();
@@ -806,17 +687,10 @@ export class CzytnikApp extends LitElement {
             : new SerialLink();
       await this.link.connect();
       this.connected = true;
-      this.readerFirmware =
-        this.link instanceof WifiLink ? (this.link.hello?.firmwareVersion ?? "") : "";
-
-      // Show tutorial wizard if not yet seen (after first device connection)
-      if (getTutorialStatus() === "not_seen") {
-        this.showTutorial = true;
-      }
-
-      // Przełącz API komponentów na real HTTP — biblioteka i ustawienia
-      // od teraz gadają z urządzeniem zamiast z mockiem.
-      // (BLE i USB jeszcze nie mają back-end API, więc dopiero WiFi to robi.)
+      this.readerFirmware = this.link instanceof WifiLink ? (this.link.hello?.firmwareVersion ?? "") : "";
+      if (getTutorialStatus() === "not_seen") this.showTutorial = true;
+      // Wi-Fi switches every screen to the reader's HTTP API (Bluetooth and
+      // USB have no such API yet).
       if (this.chosenTransport === "wifi") {
         setDeviceApi(new HttpDeviceApi());
         this.startHeartbeat();
@@ -836,18 +710,17 @@ export class CzytnikApp extends LitElement {
     this.connected = false;
     this.readerFirmware = "";
     this.chosenTransport = null;
+    this.books = [];
+    this.info = null;
     this.view = "home";
-    // Wróć do mocka — szybkie testy bez podłączonego urządzenia dalej działają.
     const { MockDeviceApi } = await import("./device/api");
     setDeviceApi(new MockDeviceApi());
   };
 
   /**
-   * Doc `docs/flower-companion-api.md` §"Zasady niezawodności" mówi: hello
-   * co 8s, timeout 3s, max 2 retry — nigdzie w kliencie to nie było
-   * zaimplementowane. Bez tego prawdziwy rozłącz (restart po OTA, wyjście
-   * z zasięgu WiFi) jest wykrywany dopiero gdy user coś kliknie i dostanie
-   * wyjątek — pill "Połączono" w headerze kłamie do tego czasu.
+   * hello every 8 s (docs/flower-companion-api.md): a reader that restarted
+   * or left the App screen shows as disconnected right away, not at the
+   * next tap.
    */
   private startHeartbeat(): void {
     this.stopHeartbeat();
@@ -863,15 +736,10 @@ export class CzytnikApp extends LitElement {
 
   private checkHeartbeat = async () => {
     if (!this.connected || this.chosenTransport !== "wifi") return;
-
-    // WifiLink flips jej własny `connected` na false gdy WebSocket dostanie
-    // "close" (np. reboot urządzenia po OTA) — sprawdź to najpierw, zanim
-    // w ogóle uderzymy w sieć.
     if (this.link && !this.link.connected) {
       await this.handleLinkLost();
       return;
     }
-
     for (let attempt = 0; attempt < 3; attempt++) {
       if (await helloDevice()) return;
     }
@@ -885,641 +753,459 @@ export class CzytnikApp extends LitElement {
     this.connected = false;
     this.readerFirmware = "";
     this.chosenTransport = null;
-    this.error =
-      "Połączenie z czytnikiem zerwane. Czytnik mógł wyjść z ekranu Aplikacja albo się zrestartować. Otwórz go ponownie i połącz się jeszcze raz.";
+    this.books = [];
+    this.info = null;
+    this.error = tr("connect.err.lost");
     const { MockDeviceApi } = await import("./device/api");
     setDeviceApi(new MockDeviceApi());
   };
 
-  // ─── Style ─────────────────────────────────────────────────────────────────
+  // ─── Styles ──────────────────────────────────────────────────────────────
 
-  static styles = css`
-    :host {
-      /* Paleta zainspirowana flower.theworkpc.com — ciepły papier zamiast
-         jaskrawego błękitu, atrament zamiast granatu, przygaszony
-         niebiesko-zielony akcent. Nazwy zmiennych zostają te same, więc
-         wszystkie komponenty potomne (shadow DOM, var(--...) dziedziczy się
-         przez granicę) przestylowują się automatycznie. */
-      --ink: #23201b;
-      --ink-soft: #6b665d;
-      --muted: #9a948a;
-      --sky-1: #ece5d7;
-      --sky-2: #f0e9dd;
-      --sky-3: #f5f0e7;
-      --paper: #f8f4ec;
-      --paper-tint: #fbf8f2;
-      --accent: #1488d8;
-      --accent-deep: #106bab;
-      --green: #2f7a4d;
-      --bloom-yellow: #e3b355;
-      --bloom-pink: #d1889b;
-      --ok: #2f7a4d;
-      --err: #b8443a;
-      --line: rgba(35, 32, 27, 0.14);
-      --shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 20px 40px -26px rgba(35, 32, 27, 0.35);
-      --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 8px 16px -10px rgba(35, 32, 27, 0.3);
-      --radius-lg: 18px;
-      --radius: 13px;
-      --radius-sm: 9px;
-      --radius-pill: 999px;
-      --fr: "Fraunces", Georgia, serif;
-      --ns: "Newsreader", Georgia, serif;
-      --mn: "JetBrains Mono", var(--mn);
-      display: flex;
-      flex-direction: column;
-      position: relative;
-      height: 100vh;
-      height: 100dvh;
-      overflow: hidden;
-      color: var(--ink);
-      font-family: var(--ns);
-      background: linear-gradient(180deg, var(--sky-1) 0%, var(--sky-2) 45%, var(--sky-3) 100%);
-    }
-
-    /* Papierowa faktura — subtelny szum, ten sam trik co na referencyjnej
-       stronie (feTurbulence w inline SVG), zero requestów sieciowych. */
-    :host::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      z-index: 0;
-      pointer-events: none;
-      mix-blend-mode: multiply;
-      opacity: 0.4;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.09'/%3E%3C/svg%3E");
-    }
-
-    header,
-    main,
-    nav {
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Full-screen sheets (cover and chapter editors) live inside main;
-       above header and nav so their buttons are not covered. */
-    main {
-      z-index: 2;
-    }
-
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 14px 18px 16px;
-      padding-top: calc(14px + env(safe-area-inset-top));
-      background: rgba(248, 244, 236, 0.78);
-      backdrop-filter: blur(16px);
-      box-shadow: 0 1px 0 var(--line);
-      flex: 0 0 auto;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .brand .flower {
-      color: var(--accent);
-      display: grid;
-      place-items: center;
-    }
-
-    .brand strong {
-      font-family: var(--fr);
-      font-weight: 500;
-      font-size: 1.25rem;
-      letter-spacing: -0.01em;
-      line-height: 1;
-      display: block;
-    }
-
-    .brand small {
-      font-family: var(--mn);
-      font-size: 0.7rem;
-      color: var(--muted);
-      letter-spacing: 0.06em;
-    }
-
-    .badges {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .badge {
-      padding: 4px 8px;
-      border: 1px solid currentColor;
-      font: 700 0.68rem/1 var(--mn);
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-    .badge.dev {
-      background: #ff7a45;
-      color: #fff;
-      border-color: #ff7a45;
-    }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      padding: 5px 10px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-pill);
-      background: transparent;
-      color: var(--muted);
-      font: 600 0.72rem/1 var(--mn);
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-    }
-    .pill.ok {
-      border-color: rgba(47, 122, 77, 0.35);
-      color: var(--green);
-    }
-    .pill .dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: currentColor;
-      box-shadow: 0 0 6px currentColor;
-    }
-
-    main {
-      flex: 1 1 auto;
-      display: flex;
-      flex-direction: column;
-      padding: 20px;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-
-    .view-anim {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      animation: view-in 0.26s cubic-bezier(0.22, 1, 0.36, 1);
-    }
-
-    @keyframes view-in {
-      from {
-        opacity: 0;
-        transform: translateY(8px);
+  static styles = [
+    themeTokens,
+    sharedStyles,
+    css`
+      :host {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
       }
-      to {
-        opacity: 1;
-        transform: none;
+
+      header {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: calc(10px + var(--safe-top)) 16px 10px;
+        background: var(--bg);
       }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .view-anim {
-        animation: none;
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 0;
+        border: 0;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
       }
-    }
+      .brand .mark {
+        color: var(--accent-text);
+        display: grid;
+      }
+      .brand strong {
+        font-size: 1.2rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .badges {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .badge.dev {
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: #ff7a45;
+        color: #fff;
+        font-size: 0.7rem;
+        font-weight: 700;
+      }
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 6px 12px;
+        border-radius: var(--radius-pill);
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .status .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .status.on {
+        color: var(--ok);
+      }
 
-    .hero {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      gap: 10px;
-      padding: 16px 20px 4px;
-    }
+      main {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+      }
+      .view {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 4px 16px 24px;
+        animation: view-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      @keyframes view-in {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .view {
+          animation: none;
+        }
+      }
+      h1 {
+        margin: 6px 2px 0;
+        font-size: 1.7rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
 
-    .hero-flower {
-      color: var(--accent);
-    }
+      .hero {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 10px;
+        padding: 18px 8px 6px;
+      }
+      .hero-mark {
+        color: var(--accent-text);
+      }
+      .hero h2 {
+        font-size: 1.6rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .hero p {
+        max-width: 34ch;
+        color: var(--text-2);
+        line-height: 1.5;
+      }
 
-    .hero h2 {
-      margin: 0;
-      font-family: var(--fr);
-      font-weight: 300;
-      font-size: 2.1rem;
-      letter-spacing: -0.02em;
-    }
+      .tile-ico {
+        flex: 0 0 auto;
+        width: 42px;
+        height: 42px;
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        background: var(--accent-soft);
+        color: var(--accent-text);
+      }
+      .choice {
+        min-height: 72px;
+      }
+      .choice:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .choice .title,
+      .item .title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+      }
+      .chev {
+        color: var(--muted);
+        display: grid;
+      }
+      .pill {
+        padding: 3px 9px;
+        border-radius: var(--radius-pill);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font-size: 0.72rem;
+        font-style: normal;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .pill.on,
+      em.pill {
+        background: var(--accent-soft);
+        color: var(--accent-text);
+      }
+      .center {
+        align-self: center;
+      }
 
-    .hero p {
-      margin: 0;
-      color: var(--ink-soft);
-      max-width: 36ch;
-      line-height: 1.5;
-      font-size: 1rem;
-      font-family: var(--ns);
-    }
+      .card-title {
+        font-size: 1.2rem;
+      }
+      .steps {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: step;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        color: var(--text-2);
+        line-height: 1.5;
+      }
+      .steps li {
+        position: relative;
+        padding-left: 38px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .steps li:not(.callout)::before {
+        counter-increment: step;
+        content: counter(step);
+        position: absolute;
+        left: 0;
+        top: -1px;
+        width: 26px;
+        height: 26px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--on-accent);
+        font-size: 0.8rem;
+        font-weight: 700;
+      }
+      .steps li.callout {
+        padding: 12px 14px;
+        border-radius: var(--radius-sm);
+        background: var(--surface-2);
+      }
+      .steps b {
+        color: var(--text);
+      }
+      code {
+        padding: 1px 6px;
+        border-radius: 6px;
+        background: var(--surface-3);
+        color: var(--text);
+        font-family: var(--font-mono);
+        font-size: 0.88em;
+      }
 
-    .card {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      padding: 20px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-lg);
-      background: var(--paper);
-      box-shadow: var(--shadow);
-    }
+      .now {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .now-card {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 14px;
+        border: 0;
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+        color: var(--text);
+        text-align: left;
+        cursor: pointer;
+      }
+      .cover {
+        position: relative;
+        flex: 0 0 auto;
+        width: 62px;
+        height: 78px;
+        display: grid;
+        place-items: center;
+        padding-left: 8px;
+        border-radius: 7px;
+        background-size: cover;
+        background-position: center;
+        color: #fff;
+        font-size: 1.2rem;
+        font-weight: 600;
+        overflow: hidden;
+      }
+      .cover::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 7px;
+        width: 2px;
+        background: rgba(8, 8, 10, 0.62);
+      }
+      .now-text {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .now-text strong {
+        font-size: 1.05rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .now-text small {
+        color: var(--muted);
+        font-size: 0.82rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .now-text .progress {
+        margin-top: 6px;
+      }
+      .now-text .pct {
+        color: var(--accent-text);
+        font-weight: 600;
+      }
 
-    .card h3 {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin: 0;
-      font-family: var(--fr);
-      font-weight: 400;
-      font-size: 1.25rem;
-      color: var(--ink);
-    }
+      .tiles {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .tile {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        min-height: 122px;
+        padding: 14px;
+        border: 0;
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+        color: var(--text);
+        text-align: left;
+        cursor: pointer;
+      }
+      .tile:active {
+        background: var(--surface-2);
+      }
+      .tile .tile-ico {
+        margin-bottom: 6px;
+      }
+      .tile strong {
+        font-size: 0.98rem;
+      }
+      .tile small {
+        color: var(--muted);
+        font-size: 0.8rem;
+        line-height: 1.35;
+      }
 
-    .muted {
-      color: var(--muted);
-      line-height: 1.5;
-      margin: 0;
-      font-family: var(--ns);
-    }
+      .device {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1px;
+        border-radius: var(--radius-lg);
+        background: var(--line);
+        overflow: hidden;
+      }
+      .stats div {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        padding: 14px 6px;
+        background: var(--surface);
+        text-align: center;
+      }
+      .stats span {
+        color: var(--accent-text);
+        display: grid;
+      }
+      .stats strong {
+        max-width: 100%;
+        font-size: 0.95rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .stats small {
+        color: var(--muted);
+        font-size: 0.74rem;
+      }
 
-    code {
-      font-family: var(--mn);
-      padding: 0.1em 0.4em;
-      border-radius: 0.4em;
-      background: var(--sky-2);
-      color: var(--accent-deep);
-      font-size: 0.92em;
-    }
+      .feed {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-2);
+        font-size: 0.86rem;
+      }
 
-    .choice {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      padding: 14px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--paper-tint);
-      color: var(--ink);
-      font: inherit;
-      cursor: pointer;
-      text-align: left;
-      box-shadow: var(--shadow-sm);
-      transition: border-color 0.15s ease, transform 0.15s ease;
-    }
-    .choice:hover:not(:disabled) {
-      border-color: var(--accent);
-    }
-    .choice:active:not(:disabled) {
-      background: var(--sky-2);
-      transform: scale(0.99);
-    }
-    .choice:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .choice.subtle {
-      background: transparent;
-      box-shadow: none;
-    }
-    .choice-ico {
-      flex: 0 0 auto;
-      width: 44px;
-      height: 44px;
-      display: grid;
-      place-items: center;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--sky-2);
-      color: var(--accent);
-    }
-    .choice-body {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-    .choice-body strong {
-      font-family: var(--fr);
-      font-size: 1.05rem;
-    }
-    .choice-body span {
-      font-family: var(--ns);
-      font-size: 0.85rem;
-      color: var(--muted);
-      line-height: 1.4;
-    }
+      nav {
+        flex: 0 0 auto;
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        padding: 6px 4px calc(6px + var(--safe-bottom));
+        background: var(--bg);
+        border-top: 1px solid var(--line);
+      }
+      nav button {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        min-width: 0;
+        padding: 4px 2px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      nav .ico {
+        width: 56px;
+        height: 30px;
+        display: grid;
+        place-items: center;
+        border-radius: var(--radius-pill);
+        transition: background 0.15s ease;
+      }
+      nav .label {
+        max-width: 100%;
+        font-size: 0.7rem;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      nav button.on {
+        color: var(--text);
+      }
+      nav button.on .ico {
+        background: var(--accent);
+        color: var(--on-accent);
+      }
+    `,
+  ];
+}
 
-    .link-button {
-      align-self: flex-start;
-      background: transparent;
-      border: 0;
-      color: var(--accent);
-      padding: 4px 0;
-      cursor: pointer;
-      font:
-        600 0.88rem/1 var(--mn);
-    }
-
-    .steps {
-      margin: 0;
-      padding-left: 1.2rem;
-      color: var(--ink-soft);
-      font-family: var(--ns);
-      line-height: 1.5;
-    }
-    .steps li {
-      margin: 8px 0;
-    }
-    .steps .cta.small {
-      display: block;
-      margin-top: 6px;
-      padding: 8px 14px;
-      font-size: 0.85rem;
-    }
-    .steps .callout {
-      background: rgba(46, 142, 255, 0.08);
-      border: 1px solid rgba(46, 142, 255, 0.25);
-      border-radius: var(--radius-sm);
-      padding: 8px 10px;
-      list-style: none;
-      margin-left: -1.2rem;
-    }
-
-    .row {
-      display: flex;
-      gap: 10px;
-    }
-    .row .cta {
-      flex: 1 1 0;
-    }
-
-    .cta {
-      padding: 14px 20px;
-      border: 1px solid var(--accent);
-      border-radius: var(--radius-sm);
-      color: #fff;
-      background: var(--accent);
-      font: 700 0.88rem/1 var(--mn);
-      letter-spacing: 0.02em;
-      cursor: pointer;
-      box-shadow: var(--shadow-sm);
-      transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
-    }
-    .cta:hover {
-      background: var(--accent-deep);
-      border-color: var(--accent-deep);
-    }
-    .cta:active:not(:disabled) {
-      background: var(--ink);
-      border-color: var(--ink);
-      transform: scale(0.98);
-    }
-    .cta:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-    }
-    .cta.ghost {
-      background: transparent;
-      color: var(--accent);
-      border: 1px solid var(--accent);
-    }
-    .cta.ghost:hover {
-      background: var(--accent);
-      color: #fff;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-
-    .tile {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 4px;
-      padding: 14px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--paper-tint);
-      color: var(--ink);
-      cursor: pointer;
-      text-align: left;
-      font: inherit;
-      min-height: 100px;
-      box-shadow: var(--shadow-sm);
-      transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
-    }
-    .tile:hover {
-      border-color: var(--accent);
-    }
-    .tile:active {
-      background: var(--sky-2);
-      transform: scale(0.99);
-    }
-    .tile-ico {
-      width: 36px;
-      height: 36px;
-      display: grid;
-      place-items: center;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--sky-2);
-      color: var(--accent);
-      margin-bottom: 4px;
-    }
-    .tile strong {
-      font-family: var(--fr);
-      font-size: 1rem;
-    }
-    .tile span {
-      font-family: var(--ns);
-      font-size: 0.78rem;
-      color: var(--muted);
-      line-height: 1.35;
-    }
-
-    .plugin-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .plugin {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--paper-tint);
-    }
-    .plugin-ico {
-      color: var(--bloom-pink);
-      flex: 0 0 auto;
-    }
-    .plugin-body {
-      flex: 1 1 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-    }
-    .plugin-body strong {
-      font-family: var(--fr);
-      font-size: 1rem;
-    }
-    .plugin-body span {
-      font-family: var(--ns);
-      font-size: 0.82rem;
-      color: var(--muted);
-    }
-    .badge {
-      padding: 3px 8px;
-      border-radius: var(--radius-pill);
-      background: var(--sky-2);
-      color: var(--ink-soft);
-      font: 600 0.68rem/1 var(--mn);
-    }
-    .badge.ok {
-      background: rgba(45, 122, 77, 0.14);
-      color: var(--green);
-    }
-
-    .cta.small {
-      padding: 9px 16px;
-      font-size: 0.8rem;
-    }
-
-    .rss-editor {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      padding: 14px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--paper-tint);
-      font-family: var(--ns);
-    }
-    .rss-list {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .rss-list li {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 8px 10px;
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-    }
-    .rss-list li span {
-      font-size: 0.82rem;
-      color: var(--ink-soft);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .rss-add {
-      display: flex;
-      gap: 8px;
-    }
-    .rss-add input {
-      flex: 1 1 auto;
-      padding: 10px 12px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: #fff;
-      font: 0.88rem var(--ns);
-      color: var(--ink);
-    }
-    .del {
-      width: 28px;
-      height: 28px;
-      flex: 0 0 auto;
-      border: 0;
-      border-radius: 50%;
-      background: rgba(228, 77, 101, 0.1);
-      color: var(--err);
-      font-size: 0.8rem;
-      cursor: pointer;
-    }
-
-    .settings-list {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 0;
-    }
-    .settings-list li {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--line);
-      font-family: var(--ns);
-    }
-    .settings-list li:last-child {
-      border-bottom: 0;
-    }
-    .settings-list strong {
-      font-weight: 600;
-    }
-    .settings-list span {
-      color: var(--muted);
-    }
-
-    .error {
-      color: var(--err);
-      font-size: 0.9rem;
-      font-family: var(--ns);
-    }
-
-    nav {
-      display: grid;
-      grid-template-columns: repeat(6, 1fr);
-      flex: 0 0 auto;
-      padding-bottom: env(safe-area-inset-bottom);
-      border-top: 1px solid var(--line);
-      background: rgba(248, 244, 236, 0.9);
-      backdrop-filter: blur(16px);
-    }
-    nav button {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      min-height: 52px;
-      padding: 10px 1px 8px;
-      background: transparent;
-      border: 0;
-      border-top: 2px solid transparent;
-      color: var(--muted);
-      font: 600 0.56rem/1.05 var(--mn);
-      cursor: pointer;
-      letter-spacing: -0.01em;
-      white-space: nowrap;
-      transition: color 0.15s ease, border-color 0.15s ease;
-    }
-    nav button .ico {
-      width: 24px;
-      height: 24px;
-      display: grid;
-      place-items: center;
-    }
-    nav button.active {
-      color: var(--accent);
-      border-top-color: var(--accent);
-    }
-    nav button:active:not(:disabled) {
-      background: var(--sky-2);
-    }
-    nav button:disabled {
-      opacity: 0.3;
-    }
-  `;
+function formatKb(kb: number): string {
+  if (kb < 1024) return `${kb} kB`;
+  if (kb < 1024 * 1024) return `${(kb / 1024).toFixed(0)} MB`;
+  return `${(kb / 1024 / 1024).toFixed(1)} GB`;
 }
 
 declare global {

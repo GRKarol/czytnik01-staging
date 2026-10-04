@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing, svg } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { deviceApi, PICTURE_SIZE, type PictureKind } from "../device/api";
+import { onLangChange, tr } from "../i18n/index";
 import {
   INITIAL_CROP,
   clampCrop,
@@ -62,14 +63,18 @@ export class CoverEditor extends LitElement {
   private pointers = new Map<number, { x: number; y: number }>();
   private pinchStart: { distance: number; zoom: number } | null = null;
 
+  private unsubLang: (() => void) | null = null;
+
   connectedCallback(): void {
     super.connectedCallback();
+    this.unsubLang = onLangChange(() => this.requestUpdate());
     void this.loadCurrent();
     if (this.epubCover && !this.hasCover) void this.useBlob("cover", this.epubCover);
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
+    this.unsubLang?.();
     const images = new Set([this.slots.cover.image, this.slots.spine.image]);
     for (const image of images) releaseImage(image);
   }
@@ -97,19 +102,19 @@ export class CoverEditor extends LitElement {
 
   render() {
     return html`
-      <div class="sheet" role="dialog" aria-label="Okładka książki">
+      <div class="sheet" role="dialog" aria-label=${tr("cv.title")}>
         <header>
           <div>
-            <small>Okładka i grzbiet</small>
+            <small>${tr("cv.title")}</small>
             <strong>${this.bookTitle || this.bookName}</strong>
           </div>
-          <button class="icon" @click=${this.close} aria-label="Zamknij">✕</button>
+          <button class="icon" @click=${this.close} aria-label=${tr("common.close")}>✕</button>
         </header>
 
         <nav class="steps">
-          ${this.stepButton("cover", "1", "Okładka")}
-          ${this.stepButton("spine", "2", "Grzbiet")}
-          ${this.stepButton("preview", "3", "Podgląd")}
+          ${this.stepButton("cover", "1", tr("lib.cover"))}
+          ${this.stepButton("spine", "2", tr("cv.spine"))}
+          ${this.stepButton("preview", "3", tr("cv.preview"))}
         </nav>
 
         <div class="body">
@@ -120,18 +125,18 @@ export class CoverEditor extends LitElement {
 
         <footer>
           ${this.step === "cover"
-            ? html`<button class="cta" @click=${() => (this.step = "spine")}>Dalej: grzbiet</button>`
+            ? html`<button class="cta" @click=${() => (this.step = "spine")}>${tr("cv.nextSpine")}</button>`
             : this.step === "spine"
               ? html`
-                  <button class="cta ghost" @click=${() => (this.step = "cover")}>Wróć</button>
+                  <button class="cta ghost" @click=${() => (this.step = "cover")}>${tr("common.back")}</button>
                   <button class="cta" @click=${() => (this.step = "preview")}>
-                    ${this.slots.spine.image || this.slots.spine.reset ? "Dalej: podgląd" : "Pomiń"}
+                    ${this.slots.spine.image || this.slots.spine.reset ? tr("cv.nextPreview") : tr("common.skip")}
                   </button>
                 `
               : html`
-                  <button class="cta ghost" @click=${() => (this.step = "spine")}>Wróć</button>
+                  <button class="cta ghost" @click=${() => (this.step = "spine")}>${tr("common.back")}</button>
                   <button class="cta" ?disabled=${!!this.busy || !this.hasChanges()} @click=${this.save}>
-                    ${this.busy || "Wyślij na czytnik"}
+                    ${this.busy || tr("cv.send")}
                   </button>
                 `}
         </footer>
@@ -156,8 +161,8 @@ export class CoverEditor extends LitElement {
     return html`
       <p class="lead">
         ${kind === "cover"
-          ? "Okładka pojawia się na karcie Czytaj, w szczegółach książki i na wygaszaczu."
-          : "Grzbiet widać na półce w Bibliotece. Możesz go pominąć, wtedy zostanie kolorowy z literami tytułu."}
+          ? tr("cv.coverLead")
+          : tr("cv.spineLead")}
       </p>
 
       <div class="stage">
@@ -182,7 +187,7 @@ export class CoverEditor extends LitElement {
       ${slot.image
         ? html`
             <label class="zoom">
-              <span>Przybliżenie</span>
+              <span>${tr("cv.zoom")}</span>
               <input
                 type="range"
                 min="1"
@@ -197,10 +202,7 @@ export class CoverEditor extends LitElement {
               />
             </label>
             <p class="hint">
-              Przesuń zdjęcie palcem, rozsuń dwoma palcami, żeby przybliżyć.
-              ${kind === "cover"
-                ? "Cienka kreska z lewej to grzbiet okładki, czytnik rysuje ją w tym samym miejscu."
-                : "Poziome kreski i zakładka postępu zostaną na grzbiecie jak na czytniku. Na niższych grzbietach góra i dół mogą być lekko przycięte."}
+              ${tr("cv.hint")} ${kind === "cover" ? tr("cv.hintCover") : tr("cv.hintSpine")}
             </p>
           `
         : nothing}
@@ -208,19 +210,19 @@ export class CoverEditor extends LitElement {
       <div class="actions">
         <label class="btn">
           <input type="file" accept="image/*" hidden @change=${(e: Event) => this.onPick(e, kind)} />
-          ${slot.image ? "Inne zdjęcie" : "Wybierz zdjęcie"}
+          ${slot.image ? tr("cv.otherPhoto") : tr("cv.pickPhoto")}
         </label>
         ${kind === "cover" && this.epubCover
           ? html`<button class="btn ghost" @click=${() => this.useBlob("cover", this.epubCover!)}>
-              Okładka z pliku EPUB
+              ${tr("lib.coverFromEpub")}
             </button>`
           : nothing}
         ${kind === "spine" && this.slots.cover.image
-          ? html`<button class="btn ghost" @click=${this.spineFromCover}>Użyj zdjęcia okładki</button>`
+          ? html`<button class="btn ghost" @click=${this.spineFromCover}>${tr("cv.useCover")}</button>`
           : nothing}
         ${hasOwn
           ? html`<button class="btn ghost danger" @click=${() => this.resetSlot(kind)}>
-              Przywróć domyślną
+              ${tr("cv.reset")}
             </button>`
           : nothing}
       </div>
@@ -283,7 +285,7 @@ export class CoverEditor extends LitElement {
       const image = await loadImage(blob);
       this.patchSlot(kind, { image, crop: { ...INITIAL_CROP }, reset: false });
     } catch {
-      this.error = "Nie udało się otworzyć tego zdjęcia. Spróbuj innego pliku (JPG albo PNG).";
+      this.error = tr("cv.badImage");
     }
   }
 
@@ -346,9 +348,9 @@ export class CoverEditor extends LitElement {
 
   private renderPreview() {
     return html`
-      <p class="lead">Tak książka będzie wyglądać na czytniku: karta Czytaj, półka w Bibliotece i szczegóły.</p>
+      <p class="lead">${tr("cv.previewLead")}</p>
       <canvas id="preview" width="1280" height="672"></canvas>
-      ${!this.hasChanges() ? html`<p class="hint">Nic się nie zmieniło. Wybierz zdjęcie w kroku 1 albo 2.</p>` : nothing}
+      ${!this.hasChanges() ? html`<p class="hint">${tr("cv.noChanges")}</p>` : nothing}
     `;
   }
 
@@ -408,7 +410,7 @@ export class CoverEditor extends LitElement {
     ctx.fillText(ellipsize(ctx, this.bookTitle || this.bookName, 440), 84, 34);
     ctx.fillStyle = "#8a8d98";
     ctx.font = "13px Inter, system-ui, sans-serif";
-    ctx.fillText(ellipsize(ctx, this.bookAuthor || "Nieznany autor", 440), 84, 54);
+    ctx.fillText(ellipsize(ctx, this.bookAuthor || tr("cv.unknownAuthor"), 440), 84, 54);
     ctx.fillStyle = "#3a3d48";
     roundRect(ctx, 84, 68, 440, 5, 2.5);
     ctx.fill();
@@ -477,17 +479,17 @@ export class CoverEditor extends LitElement {
     ctx.fillText(ellipsize(ctx, this.bookTitle || this.bookName, 480), 124, top + 20);
     ctx.fillStyle = "#8a8d98";
     ctx.font = "13px Inter, system-ui, sans-serif";
-    ctx.fillText(ellipsize(ctx, this.bookAuthor || "Nieznany autor", 480), 124, top + 42);
+    ctx.fillText(ellipsize(ctx, this.bookAuthor || tr("cv.unknownAuthor"), 480), 124, top + 42);
     ctx.fillStyle = "#3d5afe";
     roundRect(ctx, 124, top + 62, 240, 36, 8);
     ctx.fill();
     ctx.fillStyle = "#fff";
-    ctx.fillText("Czytaj dalej", 150, top + 85);
+    ctx.fillText(tr("cv.continue"), 150, top + 85);
     ctx.fillStyle = "#1b1d24";
     roundRect(ctx, 372, top + 62, 240, 36, 8);
     ctx.fill();
     ctx.fillStyle = "#d8d9de";
-    ctx.fillText("Rozdziały", 398, top + 85);
+    ctx.fillText(tr("lib.chapters"), 398, top + 85);
     ctx.restore();
   }
 
@@ -504,13 +506,12 @@ export class CoverEditor extends LitElement {
     try {
       for (const kind of ["cover", "spine"] as PictureKind[]) {
         const slot = this.slots[kind];
-        const label = kind === "cover" ? "okładkę" : "grzbiet";
         if (slot.image) {
-          this.busy = `Wysyłam ${label}…`;
+          this.busy = tr(kind === "cover" ? "cv.sendingCover" : "cv.sendingSpine");
           const picture = renderCrop(slot.image, slot.image.naturalWidth, slot.image.naturalHeight, kind, slot.crop);
           await deviceApi.uploadBookPicture(this.bookName, kind, encodePicture(picture));
         } else if (slot.reset && (kind === "cover" ? this.hasCover : this.hasSpine)) {
-          this.busy = `Usuwam ${label}…`;
+          this.busy = tr(kind === "cover" ? "cv.removingCover" : "cv.removingSpine");
           await deviceApi.deleteBookPicture(this.bookName, kind);
         }
       }

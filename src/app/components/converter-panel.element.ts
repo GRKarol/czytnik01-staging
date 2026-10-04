@@ -10,6 +10,7 @@ import {
 import { deviceApi, onDeviceApiChange } from "../device/api";
 import { HttpDeviceApi } from "../device/http-api";
 import { extractEpubCover } from "../converter/epub";
+import { formatNumber, onLangChange, tr } from "../i18n/index";
 import "./first-use-hint.element";
 import "./cover-editor.element";
 import "./chapter-editor.element";
@@ -37,17 +38,20 @@ export class ConverterPanel extends LitElement {
   @state() private epubCover: Blob | null = null;
 
   private unsubApi: (() => void) | null = null;
+  private unsubLang: (() => void) | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.unsubApi = onDeviceApiChange(() => {
       this.deviceConnected = deviceApi.current instanceof HttpDeviceApi;
     });
+    this.unsubLang = onLangChange(() => this.requestUpdate());
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.unsubApi?.();
+    this.unsubLang?.();
   }
 
   render() {
@@ -67,14 +71,14 @@ export class ConverterPanel extends LitElement {
           hidden
         />
         <label for="picker" class="picker">
-          <strong>Wybierz plik</strong>
-          <span>lub upuść go tutaj</span>
+          <strong>${tr("conv.pick")}</strong>
+          <span>${tr("conv.drop")}</span>
           <span class="formats">EPUB · PDF · MOBI · AZW3 · DOCX · ODT · TXT · MD · HTML</span>
         </label>
       </div>
 
       ${this.stage === "parsing"
-        ? html`<p class="status">Parsuję <strong>${this.fileName}</strong>…</p>`
+        ? html`<p class="status">${tr("conv.parsing", { name: this.fileName })}</p>`
         : ""}
       ${this.stage === "error" ? html`<p class="error">${this.error}</p>` : ""}
       ${this.stage === "ready" && this.book ? this.renderReady() : ""}
@@ -92,10 +96,10 @@ export class ConverterPanel extends LitElement {
 
     return html`
       <section class="result">
-        <h4>Gotowe</h4>
+        <h4>${tr("conv.ready")}</h4>
         <div class="meta">
           <label>
-            <span>Tytuł</span>
+            <span>${tr("conv.title")}</span>
             <input
               type="text"
               .value=${this.bookTitle}
@@ -105,7 +109,7 @@ export class ConverterPanel extends LitElement {
             />
           </label>
           <label>
-            <span>Autor</span>
+            <span>${tr("conv.author")}</span>
             <input
               type="text"
               .value=${this.bookAuthor}
@@ -116,29 +120,29 @@ export class ConverterPanel extends LitElement {
           </label>
         </div>
         <ul class="stats">
-          <li><strong>${formatNumber(wordCount)}</strong>słów</li>
-          <li><strong>${chapters}</strong>rozdziałów</li>
-          <li><strong>${formatNumber(paragraphs)}</strong>paragrafów</li>
-          <li><strong>${formatBytes(new Blob([this.rsvp]).size)}</strong>.rsvp</li>
+          <li><span>${tr("conv.words")}</span><strong>${formatNumber(wordCount)}</strong></li>
+          <li><span>${tr("conv.chapters")}</span><strong>${chapters}</strong></li>
+          <li><span>${tr("conv.paragraphs")}</span><strong>${formatNumber(paragraphs)}</strong></li>
+          <li><span>${tr("conv.size")}</span><strong>${formatBytes(new Blob([this.rsvp]).size)}</strong></li>
         </ul>
-        <div class="row">
-          <button class="cta" @click=${this.download}>Pobierz .rsvp</button>
-          <button
-            class="cta ghost"
-            ?disabled=${!this.deviceConnected || this.sendState === "sending"}
-            title=${this.deviceConnected ? "" : "Połącz się z czytnikiem przez WiFi, żeby wysłać bezpośrednio"}
-            @click=${this.sendToDevice}
-          >
-            ${this.sendState === "sending" ? `Wysyłam… ${this.sendProgress}%` : "Wyślij na urządzenie"}
-          </button>
-        </div>
+        <!-- Sending is the usual way: the blue button. The .rsvp file is for
+             readers without a connection, so it stays a quiet text button. -->
+        <button
+          class="cta"
+          ?disabled=${!this.deviceConnected || this.sendState === "sending"}
+          @click=${this.sendToDevice}
+        >
+          ${this.sendState === "sending" ? tr("lib.sending", { n: this.sendProgress }) : tr("conv.send")}
+        </button>
+        ${this.deviceConnected ? nothing : html`<p class="status">${tr("conv.notConnected")}</p>`}
+        <button class="cta quiet" @click=${this.download}>${tr("conv.download")}</button>
         ${this.sendState === "sent"
-          ? html`<p class="status ok">Wysłano do biblioteki na czytniku.</p>
+          ? html`<p class="status ok">${tr("conv.sent")}</p>
               <div class="row">
                 <button class="cta ghost" @click=${() => (this.editor = "cover")}>
-                  ${this.epubCover ? "Okładka (jest w pliku EPUB)" : "Dodaj okładkę"}
+                  ${this.epubCover ? tr("lib.coverFromEpub") : tr("lib.addCover")}
                 </button>
-                <button class="cta ghost" @click=${() => (this.editor = "chapters")}>Rozdziały</button>
+                <button class="cta ghost" @click=${() => (this.editor = "chapters")}>${tr("lib.chapters")}</button>
               </div>`
           : ""}
         ${this.editor === "cover"
@@ -160,7 +164,7 @@ export class ConverterPanel extends LitElement {
           : nothing}
         ${this.sendState === "error" ? html`<p class="error">${this.sendError}</p>` : ""}
         <details class="preview">
-          <summary>Podgląd pierwszych linii</summary>
+          <summary>${tr("conv.preview")}</summary>
           <pre>${this.rsvp.split("\n").slice(0, 20).join("\n")}</pre>
         </details>
       </section>
@@ -204,7 +208,7 @@ export class ConverterPanel extends LitElement {
     const detection = detectFormat(file);
     if (detection.kind === "unknown") {
       this.stage = "error";
-      this.error = `Nieobsługiwany format: ${file.name}.`;
+      this.error = tr("err.conv.unsupported", { name: file.name });
       return;
     }
 
@@ -285,7 +289,7 @@ export class ConverterPanel extends LitElement {
     }
     .drop.over {
       border-color: var(--accent);
-      background: rgba(46, 142, 255, 0.08);
+      background: var(--accent-soft);
     }
     .picker {
       display: flex;
@@ -345,7 +349,7 @@ export class ConverterPanel extends LitElement {
       padding: 10px 12px;
       border: 1px solid var(--line);
       border-radius: var(--radius-sm, 9px);
-      background: #fff;
+      background: var(--surface-2);
       font: 0.95rem var(--ns);
       color: var(--ink);
     }
@@ -363,8 +367,8 @@ export class ConverterPanel extends LitElement {
     }
     .stats li {
       display: flex;
-      gap: 4px;
-      align-items: baseline;
+      flex-direction: column;
+      gap: 2px;
       padding: 10px 12px;
       border: 1px solid var(--line);
       border-radius: var(--radius-sm, 9px);
@@ -402,8 +406,18 @@ export class ConverterPanel extends LitElement {
     }
     .cta.ghost {
       background: transparent;
-      color: var(--accent);
-      border: 1px solid var(--accent);
+      color: var(--accent-text);
+      border: 1px solid var(--outline);
+    }
+    .cta.quiet {
+      background: transparent;
+      border-color: transparent;
+      color: var(--text-2);
+      font-weight: 600;
+    }
+    .cta.quiet:hover {
+      background: var(--surface-2);
+      border-color: transparent;
     }
     .cta:disabled {
       opacity: 0.55;
@@ -447,6 +461,3 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function formatNumber(n: number): string {
-  return n.toLocaleString("pl-PL");
-}

@@ -1,34 +1,47 @@
 /**
- * Lightweight i18n module for the Flower reader PWA.
+ * i18n for the Flower app, six languages (the reader's own set).
  *
- * - Flat key lookup from bundled JSON locale files
- * - Fallback chain: active locale → English → key string as-is
- * - Invalid language code → defaults to Polish (app default)
- * - Emits "lang-changed" CustomEvent on document for reactive updates
+ * - `tr(key, params)` / `t(key)`: the string table in ./strings (one entry
+ *   per key with every language side by side), then the older JSON locale
+ *   files (tutorial, tooltips, help), then English, then the key itself.
+ * - Language: the one picked in the app (Więcej → Język aplikacji) wins;
+ *   without a pick the app follows the reader once connected, and the
+ *   phone's language before that.
+ * - Emits "lang-changed" on document; the shell re-renders on it.
  */
 
-// Static locale imports — bundled by Vite via resolveJsonModule.
-// Locale files are created in subsequent tasks; empty objects act as safe defaults
-// until real translations are provided.
 import enLocale from "./locales/en.json";
 import esLocale from "./locales/es.json";
 import frLocale from "./locales/fr.json";
 import deLocale from "./locales/de.json";
 import roLocale from "./locales/ro.json";
 import plLocale from "./locales/pl.json";
+import { STRINGS } from "./strings";
 
 export type SupportedLang = "en" | "es" | "fr" | "de" | "ro" | "pl";
 
-const SUPPORTED_LANGS: ReadonlySet<string> = new Set<SupportedLang>([
-  "en",
-  "es",
-  "fr",
-  "de",
-  "ro",
-  "pl",
-]);
+export const SUPPORTED_LANGS: readonly SupportedLang[] = ["pl", "en", "de", "es", "fr", "ro"];
 
-const DEFAULT_LANG: SupportedLang = "pl";
+export const LANG_NAMES: Record<SupportedLang, string> = {
+  pl: "Polski",
+  en: "English",
+  de: "Deutsch",
+  es: "Español",
+  fr: "Français",
+  ro: "Română",
+};
+
+/** BCP 47 tags for number and date formatting. */
+export const LANG_LOCALE: Record<SupportedLang, string> = {
+  pl: "pl-PL",
+  en: "en-GB",
+  de: "de-DE",
+  es: "es-ES",
+  fr: "fr-FR",
+  ro: "ro-RO",
+};
+
+const STORE_LANG = "flower.lang";
 
 type LocaleMap = Record<string, string>;
 
@@ -41,58 +54,93 @@ const locales: Record<SupportedLang, LocaleMap> = {
   pl: plLocale as LocaleMap,
 };
 
-let currentLang: SupportedLang = DEFAULT_LANG;
-
-/**
- * Check whether a given string is a valid SupportedLang.
- */
 function isSupportedLang(lang: string): lang is SupportedLang {
-  return SUPPORTED_LANGS.has(lang);
+  return (SUPPORTED_LANGS as readonly string[]).includes(lang);
 }
 
-/**
- * Translate a key using the current locale.
- * Fallback chain: active locale → English → key string as-is.
- * Empty key returns empty string.
- */
-export function t(key: string): string {
+function phoneLang(): SupportedLang {
+  const tags = typeof navigator !== "undefined" ? [...(navigator.languages ?? []), navigator.language] : [];
+  for (const tag of tags) {
+    const code = (tag ?? "").slice(0, 2).toLowerCase();
+    if (isSupportedLang(code)) return code;
+  }
+  return "en";
+}
+
+/** The language picked in the app, null = automatic. */
+export function chosenLang(): SupportedLang | null {
+  try {
+    const stored = localStorage.getItem(STORE_LANG);
+    return stored && isSupportedLang(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+let currentLang: SupportedLang = chosenLang() ?? phoneLang();
+if (typeof document !== "undefined") document.documentElement.lang = currentLang;
+
+/** Translate a key; `{name}` placeholders are filled from `params`. */
+export function tr(key: string, params?: Record<string, string | number>): string {
   if (key === "") return "";
-
-  const activeTranslations = locales[currentLang];
-  if (activeTranslations && key in activeTranslations) {
-    return activeTranslations[key];
+  const entry = STRINGS[key];
+  let text: string | undefined = entry ? (entry[currentLang] ?? entry.en) : undefined;
+  if (text === undefined) text = locales[currentLang]?.[key] ?? locales.en[key];
+  if (text === undefined) return key;
+  if (params) {
+    text = text.replace(/\{(\w+)\}/g, (match, name: string) =>
+      name in params ? String(params[name]) : match,
+    );
   }
-
-  // Fallback to English
-  const enTranslations = locales.en;
-  if (enTranslations && key in enTranslations) {
-    return enTranslations[key];
-  }
-
-  // Final fallback: return key as-is
-  return key;
+  return text;
 }
 
-/**
- * Set the active language. Invalid codes default to Polish.
- * Emits a "lang-changed" CustomEvent on document for reactive updates.
- */
+/** Same as tr() without placeholders (older call sites). */
+export function t(key: string): string {
+  return tr(key);
+}
+
+/** Switch the language now (not remembered). */
 export function setLang(lang: SupportedLang | string): void {
-  const resolvedLang: SupportedLang = isSupportedLang(lang) ? lang : DEFAULT_LANG;
-  currentLang = resolvedLang;
-  document.dispatchEvent(new CustomEvent("lang-changed", { detail: { lang: resolvedLang } }));
+  const resolved: SupportedLang = isSupportedLang(lang) ? lang : "en";
+  if (resolved === currentLang) return;
+  currentLang = resolved;
+  document.documentElement.lang = resolved;
+  document.dispatchEvent(new CustomEvent("lang-changed", { detail: { lang: resolved } }));
 }
 
-/**
- * Get the currently active language.
- */
+/** The user's pick in the app; null goes back to automatic. */
+export function chooseLang(lang: SupportedLang | null): void {
+  try {
+    if (lang) localStorage.setItem(STORE_LANG, lang);
+    else localStorage.removeItem(STORE_LANG);
+  } catch {
+    /* ignored */
+  }
+  setLang(lang ?? phoneLang());
+}
+
+/** The reader's language: followed unless the user picked one in the app. */
+export function followReaderLang(lang: SupportedLang | string): void {
+  if (!chosenLang()) setLang(lang);
+}
+
 export function getLang(): SupportedLang {
   return currentLang;
 }
 
-/**
- * Subscribe to language changes. Returns an unsubscribe function.
- */
+export function getLocale(): string {
+  return LANG_LOCALE[currentLang];
+}
+
+export function formatNumber(n: number): string {
+  return n.toLocaleString(getLocale());
+}
+
+export function formatDate(value: string | number | Date): string {
+  return new Date(value).toLocaleDateString(getLocale());
+}
+
 export function onLangChange(cb: () => void): () => void {
   document.addEventListener("lang-changed", cb);
   return () => {

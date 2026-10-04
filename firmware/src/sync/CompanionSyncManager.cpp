@@ -1045,7 +1045,14 @@ void CompanionSyncManager::handleRoot() {
 
 void CompanionSyncManager::handleBooksList() {
   sendCorsHeaders();
-  server_.send(200, "application/json", "{\"ok\":true,\"books\":" + booksJsonArray() + "}");
+  // "current": the book open on the reader, library-relative ("books/x.rsvp";
+  // an EPUB's entry has the same name with .epub). The app's Start card.
+  String current = preferences_.getString("book", "");
+  if (current.startsWith("/books/")) {
+    current = current.substring(7);
+  }
+  server_.send(200, "application/json",
+               "{\"ok\":true,\"current\":\"" + jsonEscape(current) + "\",\"books\":" + booksJsonArray() + "}");
 }
 
 // The library as the reader shows it: an EPUB and the .rsvp the reader
@@ -1190,6 +1197,7 @@ void CompanionSyncManager::handleSettings() {
                jsonEscape(restartReason) + "\"}";
   }
 
+  settingsChanged_ = true;
   server_.send(200, "application/json", response);
   logLine("Settings saved" + (restartRequired ? String(" (restart required)") : String("")));
 }
@@ -1329,6 +1337,7 @@ void CompanionSyncManager::handleBookDelete() {
 
   const String filename = displayNameForPath(path);
   statusLine1_ = "Book deleted";
+  libraryChanged_ = true;
   statusLine2_ = filename;
   Serial.printf("[sync] deleted %s\n", path.c_str());
   logLine("Deleted: " + filename);
@@ -1404,7 +1413,8 @@ void CompanionSyncManager::handleBookUpload() {
 //
 // GET /api/books/text?name=&from=&count=&words=
 //   Paragraphs of the book as the reader split it: the word each starts at
-//   and its first `words` words, `count` paragraphs from paragraph `from`,
+//   and its first `words` words (up to 6000; about 24 KB per reply, fewer
+//   paragraphs than `count` when they are long), `count` paragraphs from paragraph `from`,
 //   plus the chapters the reader uses now. The app's chapter editor pages
 //   through this and marks where chapters begin, in the reader's own word
 //   numbering, so nothing is lost between the app's and the reader's parsing.
@@ -1442,7 +1452,12 @@ void CompanionSyncManager::handleBookText() {
   if (wordsArg <= 0) {
     wordsArg = 24;
   }
-  const size_t wordsPerParagraph = static_cast<size_t>(std::min(wordsArg, 80L));
+  // Whole paragraphs on request (the app's search needs every word; a PDF
+  // page is often one long paragraph). The reply stops once it passes
+  // kBookTextBudget bytes, at least one paragraph in; the app asks for the
+  // rest from where this one ended.
+  const size_t wordsPerParagraph = static_cast<size_t>(std::min(wordsArg, 6000L));
+  constexpr size_t kBookTextBudget = 24 * 1024;
 
   String body;
   body.reserve(count * 120 + 512);
@@ -1461,6 +1476,9 @@ void CompanionSyncManager::handleBookText() {
   }
   body += "],\"paragraphs\":[";
   for (size_t p = from; p < from + count; ++p) {
+    if (p > from && body.length() > kBookTextBudget) {
+      break;
+    }
     const size_t start = metadata.paragraphStarts[p];
     const size_t end = p + 1 < paragraphCount ? metadata.paragraphStarts[p + 1] : metadata.wordCount;
     String text;
@@ -1493,6 +1511,7 @@ void CompanionSyncManager::handleBookChapters() {
   if (server_.method() == HTTP_DELETE) {
     BookExtras::removeChapters(path);
     logLine("Chapters reset: " + displayNameForPath(path));
+    libraryChanged_ = true;
     server_.send(200, "application/json", "{\"ok\":true,\"custom\":false}");
     return;
   }
@@ -1526,6 +1545,7 @@ void CompanionSyncManager::handleBookChapters() {
     return;
   }
   statusLine1_ = "Chapters saved";
+  libraryChanged_ = true;
   statusLine2_ = displayNameForPath(path);
   logLine("Chapters saved: " + displayNameForPath(path) + " (" + String(static_cast<unsigned>(chapters.size())) + ")");
   server_.send(200, "application/json",
@@ -1578,6 +1598,7 @@ void CompanionSyncManager::handleBookPicture() {
   if (server_.method() == HTTP_DELETE) {
     BookExtras::removePicture(path, kind);
     logLine(String(kind == BookExtras::Picture::Cover ? "Cover" : "Spine") + " removed: " + displayNameForPath(path));
+    libraryChanged_ = true;
     server_.send(200, "application/json", "{\"ok\":true}");
     return;
   }
@@ -1598,6 +1619,7 @@ void CompanionSyncManager::handleBookPicture() {
     return;
   }
   statusLine1_ = kind == BookExtras::Picture::Cover ? "Cover saved" : "Spine saved";
+  libraryChanged_ = true;
   statusLine2_ = displayNameForPath(path);
   logLine(statusLine1_ + ": " + statusLine2_);
   server_.send(200, "application/json", "{\"ok\":true}");
@@ -1607,6 +1629,7 @@ void CompanionSyncManager::handleBookPictureUpload() {
   HTTPUpload &upload = server_.upload();
   if (upload.status == UPLOAD_FILE_START) {
     pictureError_ = "";
+    pictureBytes_ = 0;
     SD_MMC.mkdir(kConfigPath);
     SD_MMC.remove(kPictureUploadPath);
     pictureFile_ = SD_MMC.open(kPictureUploadPath, FILE_WRITE);
@@ -1619,13 +1642,16 @@ void CompanionSyncManager::handleBookPictureUpload() {
     if (!pictureError_.isEmpty() || !pictureFile_) {
       return;
     }
-    if (pictureFile_.size() + upload.currentSize > 64 * 1024) {
+    // The largest picture installPicture() takes: 256x256 RGB565 + header.
+    if (pictureBytes_ + upload.currentSize > 8 + 256 * 256 * 2) {
       pictureError_ = "Picture too large";
       return;
     }
     if (pictureFile_.write(upload.buf, upload.currentSize) != upload.currentSize) {
       pictureError_ = "Write failed";
+      return;
     }
+    pictureBytes_ += upload.currentSize;
     return;
   }
   if (upload.status == UPLOAD_FILE_END) {
@@ -2227,6 +2253,31 @@ std::vector<CompanionSyncManager::RsvpChapter> CompanionSyncManager::readRsvpCha
   return chapters;
 }
 
+namespace {
+// Same tables as App.cpp (kScreensaver*Minutes): the app shows these values
+// and sends back their index.
+constexpr uint16_t kAppScreensaverTimeoutMinutes[] = {1, 2, 3, 5, 10, 15, 20, 30};
+constexpr uint16_t kAppScreensaverAutoOffMinutes[] = {0, 5, 10, 15, 20, 30, 45, 60};
+constexpr uint16_t kAppSleepGuardMinutes[] = {0, 5, 10, 15, 20, 30, 45, 60};
+// App::ScreensaverMode values still in use (1, 4 and 5 are retired).
+constexpr uint8_t kAppScreensaverModes[] = {7, 8, 0, 2, 3, 9, 6};
+constexpr uint8_t kAppNanoLayoutCount = 4;
+constexpr uint8_t kAppLibrarySortCount = 4;
+constexpr uint8_t kAppNanoUiFontFollowReader = 0xFF;
+
+template <size_t N>
+String jsonNumberList(const uint16_t (&values)[N]) {
+  String out = "[";
+  for (size_t i = 0; i < N; ++i) {
+    if (i > 0) out += ",";
+    out += String(values[i]);
+  }
+  return out + "]";
+}
+
+String jsonBool(bool value) { return value ? "true" : "false"; }
+}  // namespace
+
 String CompanionSyncManager::settingsJson() {
   static const char *const readerModeLabels[] = {"rsvp", "scroll"};
   static const char *const handednessLabels[] = {"right", "left"};
@@ -2287,7 +2338,7 @@ String CompanionSyncManager::settingsJson() {
       clampInt(preferences_.getUChar(kPrefScrollMargin, kDefaultScrollMargin), 0, kMaxScrollMargin));
 
   String body;
-  body.reserve(1250);
+  body.reserve(2600);
   body += "{\"ok\":true,\"version\":1";
   body += ",\"reading\":{";
   body += "\"wpm\":" + String(wpm);
@@ -2380,6 +2431,71 @@ String CompanionSyncManager::settingsJson() {
   body += "\"scrollFontSize\":" + String(scrollFontSize);
   body += ",\"scrollLineSpacing\":" + String(scrollLineSpacing);
   body += ",\"scrollMargin\":" + String(scrollMargin);
+  body += "}";
+  // Reader functions beyond reading: menu look, screensaver, battery, power,
+  // radios. Same NVS keys as App.cpp; "options" carries what the app needs
+  // to show the choices (minutes, the reader's own colors and font names).
+  body += ",\"device\":{";
+  body += "\"screensaverMode\":" + String(preferences_.getUChar("scrn_sv", 7));
+  body += ",\"screensaverTimeout\":" + String(std::min<uint8_t>(preferences_.getUChar("scrn_tmo", 2), 7));
+  body += ",\"screensaverAutoOff\":" + String(std::min<uint8_t>(preferences_.getUChar("scrn_aof", 0), 7));
+  body += ",\"sleepGuard\":" + String(std::min<uint8_t>(preferences_.getUChar("scrn_slp", 0), 7));
+  body += ",\"batteryStyle\":" +
+          String(std::min<uint8_t>(preferences_.getUChar("bat_style", 0), DisplayManager::kBatteryStyleCount - 1));
+  body += ",\"focusColor\":" + String(preferences_.getUChar("foc_clr", 1));
+  body += ",\"focusRgb\":" + String(preferences_.getUShort("foc_rgb", 0x001F));
+  body += ",\"menuPalette\":" +
+          String(std::min<uint8_t>(preferences_.getUChar("nano_pal", 0), DisplayManager::nanoPaletteCount() - 1));
+  body += ",\"menuOwnAccent\":" + jsonBool(preferences_.getBool("nano_acc", false));
+  body += ",\"menuLayout\":" +
+          String(std::min<uint8_t>(preferences_.getUChar("nano_lay", 0), kAppNanoLayoutCount - 1));
+  {
+    const uint8_t font = preferences_.getUChar("nano_font", kAppNanoUiFontFollowReader);
+    body += ",\"menuFont\":" + String(font < DisplayManager::nanoUiFontCount() ? static_cast<int>(font) : -1);
+  }
+  body += ",\"librarySort\":" +
+          String(std::min<uint8_t>(preferences_.getUChar("lib_sort", 0), kAppLibrarySortCount - 1));
+  body += ",\"autoUpdate\":" + jsonBool(preferences_.getBool("ota_auto", true));
+  body += ",\"bluetooth\":" + jsonBool(preferences_.getBool("ble_on", false));
+  body += ",\"helpHints\":" + jsonBool(preferences_.getBool("help_hints", true));
+  body += ",\"savePointNames\":" + jsonBool(preferences_.getBool("sp_name_cust", true));
+  body += "}";
+  body += ",\"options\":{";
+  body += "\"screensaverModes\":[";
+  for (size_t i = 0; i < sizeof(kAppScreensaverModes); ++i) {
+    if (i > 0) body += ",";
+    body += String(kAppScreensaverModes[i]);
+  }
+  body += "]";
+  body += ",\"screensaverTimeoutMin\":" + jsonNumberList(kAppScreensaverTimeoutMinutes);
+  body += ",\"screensaverAutoOffMin\":" + jsonNumberList(kAppScreensaverAutoOffMinutes);
+  body += ",\"sleepGuardMin\":" + jsonNumberList(kAppSleepGuardMinutes);
+  body += ",\"focusColors\":[";
+  for (uint8_t i = 0; i < DisplayManager::presetFocusColorCount(); ++i) {
+    if (i > 0) body += ",";
+    body += String(DisplayManager::presetFocusColor(i));
+  }
+  body += "]";
+  body += ",\"palettes\":[";
+  for (uint8_t i = 0; i < DisplayManager::nanoPaletteCount(); ++i) {
+    if (i > 0) body += ",";
+    uint16_t bg = 0;
+    uint16_t fg = 0;
+    uint16_t accent = 0;
+    const bool fixed = DisplayManager::nanoPaletteSwatch(i, bg, fg, accent);
+    body += "{\"n\":\"" + jsonEscape(DisplayManager::nanoPaletteName(i)) + "\"";
+    if (fixed) {
+      body += ",\"c\":[" + String(bg) + "," + String(fg) + "," + String(accent) + "]";
+    }
+    body += "}";
+  }
+  body += "]";
+  body += ",\"menuFonts\":[";
+  for (uint8_t i = 0; i < DisplayManager::nanoUiFontCount(); ++i) {
+    if (i > 0) body += ",";
+    body += "\"" + jsonEscape(DisplayManager::nanoUiFontName(i)) + "\"";
+  }
+  body += "]";
   body += "}";
   // Developer mode — preferowana flaga ukrywająca advanced ustawienia na
   // urządzeniu i odsłaniająca je w aplikacji-towarzyszu. Dorzucamy na
@@ -2600,6 +2716,78 @@ bool CompanionSyncManager::applySettingsJson(const String &body, String &error) 
       return false;
     }
     preferences_.putUChar(kPrefScrollMargin, static_cast<uint8_t>(intValue));
+  }
+
+  // Reader functions from the app's Więcej screen ("device" in settingsJson).
+  struct IndexSetting {
+    const char *json;
+    const char *pref;
+    int max;
+  };
+  const IndexSetting indexSettings[] = {
+      {"screensaverTimeout", "scrn_tmo", 7},
+      {"screensaverAutoOff", "scrn_aof", 7},
+      {"sleepGuard", "scrn_slp", 7},
+      {"batteryStyle", "bat_style", DisplayManager::kBatteryStyleCount - 1},
+      {"menuPalette", "nano_pal", DisplayManager::nanoPaletteCount() - 1},
+      {"menuLayout", "nano_lay", kAppNanoLayoutCount - 1},
+      {"librarySort", "lib_sort", kAppLibrarySortCount - 1},
+  };
+  for (const IndexSetting &setting : indexSettings) {
+    if (readJsonInt(body, setting.json, intValue)) {
+      if (intValue < 0 || intValue > setting.max) {
+        error = String(setting.json) + " is out of range";
+        return false;
+      }
+      preferences_.putUChar(setting.pref, static_cast<uint8_t>(intValue));
+    }
+  }
+  if (readJsonInt(body, "screensaverMode", intValue)) {
+    bool known = false;
+    for (uint8_t mode : kAppScreensaverModes) {
+      known = known || mode == intValue;
+    }
+    if (!known) {
+      error = "screensaverMode is not a known mode";
+      return false;
+    }
+    preferences_.putUChar("scrn_sv", static_cast<uint8_t>(intValue));
+  }
+  if (readJsonInt(body, "focusColor", intValue)) {
+    if (intValue != DisplayManager::kFocusColorCustom &&
+        (intValue < 0 || intValue >= DisplayManager::presetFocusColorCount())) {
+      error = "focusColor is out of range";
+      return false;
+    }
+    preferences_.putUChar("foc_clr", static_cast<uint8_t>(intValue));
+  }
+  if (readJsonInt(body, "focusRgb", intValue)) {
+    if (intValue < 0 || intValue > 0xFFFF) {
+      error = "focusRgb must be an RGB565 value";
+      return false;
+    }
+    preferences_.putUShort("foc_rgb", static_cast<uint16_t>(intValue));
+  }
+  if (readJsonInt(body, "menuFont", intValue)) {
+    if (intValue >= static_cast<int>(DisplayManager::nanoUiFontCount())) {
+      error = "menuFont is out of range";
+      return false;
+    }
+    preferences_.putUChar("nano_font",
+                          intValue < 0 ? kAppNanoUiFontFollowReader : static_cast<uint8_t>(intValue));
+  }
+  struct BoolSetting {
+    const char *json;
+    const char *pref;
+  };
+  const BoolSetting boolSettings[] = {
+      {"menuOwnAccent", "nano_acc"}, {"autoUpdate", "ota_auto"},       {"bluetooth", "ble_on"},
+      {"helpHints", "help_hints"},   {"savePointNames", "sp_name_cust"},
+  };
+  for (const BoolSetting &setting : boolSettings) {
+    if (readJsonBool(body, setting.json, boolValue)) {
+      preferences_.putBool(setting.pref, boolValue);
+    }
   }
 
   // Developer mode toggle — odbierane przez PUT/PATCH z PWA.
@@ -2944,6 +3132,7 @@ void CompanionSyncManager::finishUpload(bool success) {
       SD_MMC.remove(uploadTmpPath_);
     } else {
       statusLine1_ = "Book received";
+      libraryChanged_ = true;
       statusLine2_ = uploadFinalPath_;
       BookExtras::restore(uploadFinalPath_);
       Serial.printf("[sync] upload ready %s\n", uploadFinalPath_.c_str());

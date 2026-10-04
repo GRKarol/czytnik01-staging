@@ -437,6 +437,9 @@ enum class TrKey4 : uint8_t {
   WizTip8,
   WizTip9,
   WizTip10,
+  WizWifiRescan,
+  WizWifiRescanHint,
+  WizWifiNoneSub,
 };
 
 namespace Translations3 {

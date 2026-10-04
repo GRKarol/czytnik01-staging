@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import type { BookEvent, ParsedBook } from "./rsvp";
+import { tr } from "../i18n/index";
 
 /**
  * OpenDocument text (.odt, LibreOffice / OpenOffice) → events.
@@ -11,7 +12,7 @@ import type { BookEvent, ParsedBook } from "./rsvp";
 export async function parseOdt(file: File): Promise<ParsedBook> {
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const contentFile = zip.file("content.xml");
-  if (!contentFile) throw new Error("To nie wygląda na plik ODT (brak content.xml).");
+  if (!contentFile) throw new Error(tr("err.conv.odtNot"));
 
   const doc = new DOMParser().parseFromString(await contentFile.async("string"), "application/xml");
   const body = Array.from(doc.getElementsByTagName("*")).find((el) => el.tagName === "office:text");
@@ -19,7 +20,7 @@ export async function parseOdt(file: File): Promise<ParsedBook> {
   if (body) walkBlocks(body, events);
 
   if (!events.some((e) => e.kind === "paragraph")) {
-    throw new Error("Nie udało się wyodrębnić tekstu z dokumentu ODT.");
+    throw new Error(tr("err.conv.odt"));
   }
 
   let title = "";
