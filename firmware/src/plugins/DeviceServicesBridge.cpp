@@ -416,9 +416,12 @@ static bool bridgeAudioStartRecording(const char* relativePath) {
     return sRecorder->startRecording(fullPath.c_str());
 }
 
+// Returns at once: the plugin task must not wait out the file close (the
+// dictaphone moves on when isRecording() turns false).
 static bool bridgeAudioStopRecording() {
     if (!sRecorder) return false;
-    return sRecorder->stopRecording();
+    sRecorder->requestStopRecording();
+    return true;
 }
 
 static bool bridgeAudioIsRecording() {

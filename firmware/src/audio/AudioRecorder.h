@@ -42,6 +42,10 @@ class AudioRecorder {
 
     // Recording
     bool startRecording(const char* absolutePath);
+    // Asks the record task to finish the take and returns at once; the task
+    // closes the file and clears isRecording() itself, usually within 0.2 s.
+    void requestStopRecording();
+    // Same, then waits up to 1.5 s for the task to finish.
     bool stopRecording();
     bool isRecording() const;
     uint32_t recordingElapsedMs() const;

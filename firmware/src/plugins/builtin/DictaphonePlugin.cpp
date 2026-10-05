@@ -1,5 +1,6 @@
 // firmware/src/plugins/builtin/DictaphonePlugin.cpp
 #include "plugins/builtin/DictaphonePlugin.h"
+#include <Arduino.h>
 
 #include <string.h>
 #include <stdio.h>
@@ -746,14 +747,25 @@ void DictaphoneCore::startRecording() {
     }
 }
 
+// Only asks the recorder to stop. The record task closes the take on the
+// card; update() lists it once isRecording() turns false. Waiting here held
+// the plugin task up to 2 s per stop, and with the card busy the plugin
+// watchdog ended the dictaphone.
 void DictaphoneCore::stopRecording() {
     if (!audio_ || !audio_->stopRecording) return;
 
     audio_->stopRecording();
-    finishRecording(lastUpdateMs_);
 }
 
 void DictaphoneCore::finishRecording(uint32_t nowMs) {
+    if (keepFinishedRecording()) {
+        goToScreen(Screen::Library);
+    } else {
+        showError(nowMs);
+    }
+}
+
+bool DictaphoneCore::keepFinishedRecording() {
     // Listed only when the file is really on the card. A take whose file
     // never opened used to be listed anyway: the row played nothing, and the
     // next delete rescanned the card and wiped every such row at once.
@@ -771,12 +783,7 @@ void DictaphoneCore::finishRecording(uint32_t nowMs) {
         }
     }
     currentRecordingName_[0] = '\0';
-
-    if (kept) {
-        goToScreen(Screen::Library);
-    } else {
-        showError(nowMs);
-    }
+    return kept;
 }
 
 void DictaphoneCore::startPlayback(uint8_t index) {
@@ -978,8 +985,17 @@ void DictaphoneCore::shutdown() {
     // running, independent of what screen_ this instance thinks it's on.
     if (!audio_) return;
 
+    // Leaving mid-take still keeps the take: the stop call no longer waits,
+    // so wait here for the file to close, then list it.
     if (audio_->isRecording && audio_->stopRecording && audio_->isRecording()) {
         audio_->stopRecording();
+        const uint32_t waitStart = millis();
+        while (audio_->isRecording() && millis() - waitStart < 1500) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        if (!audio_->isRecording()) {
+            keepFinishedRecording();
+        }
     }
     if (audio_->isPlaying && audio_->stopPlayback && audio_->isPlaying()) {
         audio_->stopPlayback();

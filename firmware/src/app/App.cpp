@@ -1261,9 +1261,13 @@ void App::startBootAccessPoint(uint32_t nowMs) {
 
 void App::update(uint32_t nowMs) {
   PowerGuard::mainLoopAlive(nowMs);
-  const SlowStepLog loopLog("loop pass", 250);
+  const SlowStepLog loopLog("loop pass", 150);
   button_.update(nowMs);
   powerButton_.update(nowMs);
+
+  // The dictaphone writes the card from core 0: a font download sharing
+  // both with it stalled the take long enough for the plugin watchdog.
+  setBackgroundDownloadsPaused(pluginLoader_.isRunning());
 
   // ── Plugin running: plugin owns the screen, App just monitors ──────────
   if (pluginLoader_.isRunning()) {
@@ -3077,6 +3081,10 @@ void App::handleTouch(uint32_t nowMs) {
   Serial.printf("[touch] phase=%s touched=%u x=%u y=%u gesture=%u state=%s\n",
                 touchPhaseName(ev.phase), ev.touched ? 1 : 0, ev.x, ev.y, ev.gesture,
                 stateName(state_));
+  const SlowStepLog touchLog(ev.phase == TouchPhase::Start ? "touch Start"
+                             : ev.phase == TouchPhase::End ? "touch End"
+                                                           : "touch Move",
+                             40);
   if (state_ == AppState::Menu) {
     applyMenuTouchGesture(ev, nowMs);
   } else {

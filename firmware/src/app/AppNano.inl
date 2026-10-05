@@ -1962,6 +1962,7 @@ bool App::nanoReaderPanelActive() const {
 }
 
 void App::renderNanoReaderPanel() {
+  const SlowStepLog slowLog("renderNanoReaderPanel", 60);
   applyReaderUiOrientation();
   display_.setModernCardStyle(true);
   contextViewVisible_ = false;

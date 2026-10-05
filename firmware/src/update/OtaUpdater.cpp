@@ -37,6 +37,7 @@ SemaphoreHandle_t wifiSessionMutex() {
 namespace {
 TaskHandle_t g_wifiForegroundTask = nullptr;
 std::atomic<bool> g_wifiYieldRequested{false};
+std::atomic<bool> g_backgroundPaused{false};
 
 bool onWifiForegroundTask() {
   return g_wifiForegroundTask != nullptr && xTaskGetCurrentTaskHandle() == g_wifiForegroundTask;
@@ -44,12 +45,16 @@ bool onWifiForegroundTask() {
 
 // Background sessions (font_dl, book_dl, ota_check) give up when the UI
 // task asks for the radio.
-bool backgroundShouldYield() { return g_wifiYieldRequested.load() && !onWifiForegroundTask(); }
+bool backgroundShouldYield() { return wifiYieldRequested() && !onWifiForegroundTask(); }
 }  // namespace
 
 void markWifiForegroundTask() { g_wifiForegroundTask = xTaskGetCurrentTaskHandle(); }
 
-bool wifiYieldRequested() { return g_wifiYieldRequested.load(); }
+bool wifiYieldRequested() { return g_wifiYieldRequested.load() || g_backgroundPaused.load(); }
+
+void setBackgroundDownloadsPaused(bool paused) { g_backgroundPaused.store(paused); }
+
+bool backgroundDownloadsPaused() { return g_backgroundPaused.load(); }
 
 bool takeWifiSession(uint32_t foregroundTimeoutMs) {
   if (!onWifiForegroundTask()) {

@@ -128,6 +128,26 @@ void setup() {
 void loop() {
   const uint32_t now = millis();
   app.update(now);
+
+  // Lag hunt: how busy the UI loop is. One line per 5 s, e.g.
+  // "[perf] loop 5 s: 812 passes, longest 420 ms, busy 61%".
+  static uint32_t windowStartMs = now;
+  static uint32_t passes = 0;
+  static uint32_t longestMs = 0;
+  static uint32_t busyMs = 0;
+  const uint32_t tookMs = millis() - now;
+  ++passes;
+  busyMs += tookMs;
+  longestMs = tookMs > longestMs ? tookMs : longestMs;
+  if (now - windowStartMs >= 5000) {
+    Serial.printf("[perf] loop 5 s: %lu passes, longest %lu ms, busy %lu%%\n",
+                  static_cast<unsigned long>(passes), static_cast<unsigned long>(longestMs),
+                  static_cast<unsigned long>(busyMs * 100 / (now - windowStartMs)));
+    windowStartMs = now;
+    passes = 0;
+    longestMs = 0;
+    busyMs = 0;
+  }
   // Yield to FreeRTOS idle task — allows light sleep between iterations
   // when no work is pending. Saves ~30-40% CPU power in idle states.
   delay(1);

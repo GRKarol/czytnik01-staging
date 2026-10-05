@@ -134,7 +134,10 @@ void PluginLoader::unload() {
 
     if (pluginTask_ != nullptr) {
         uint32_t waitStart = millis();
-        const uint32_t kMaxWaitMs = 2000;
+        // The dictaphone's destroy waits up to 1.5 s for a take to close on
+        // the card. Killing the task inside that write would leave the
+        // card's lock taken for good.
+        const uint32_t kMaxWaitMs = 4000;
 
         while (pluginTask_ != nullptr && (millis() - waitStart) < kMaxWaitMs) {
             vTaskDelay(pdMS_TO_TICKS(10));

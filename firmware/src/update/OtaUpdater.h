@@ -21,8 +21,13 @@ void markWifiForegroundTask();
 // the radio up (they stop at the next chunk) and waits at most timeoutMs;
 // background tasks wait as long as it takes.
 bool takeWifiSession(uint32_t foregroundTimeoutMs = 30000);
-// True while the UI task waits for the radio: background sessions stop.
+// True while the UI task waits for the radio, or while background downloads
+// are paused: background sessions stop.
 bool wifiYieldRequested();
+// A plugin (the dictaphone) needs the card and core 0 to itself: font, book
+// and update downloads stop at the next chunk and none starts until unpaused.
+void setBackgroundDownloadsPaused(bool paused);
+bool backgroundDownloadsPaused();
 
 // Set by tools/pio_set_version.py from RSVP_OTA_REPO (release CI).
 #ifndef RSVP_OTA_DEFAULT_REPO

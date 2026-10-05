@@ -65,6 +65,7 @@ class DictaphoneCore {
     void goToScreen(Screen screen);
     void startRecording();
     void stopRecording();
+    bool keepFinishedRecording();
     void startPlayback(uint8_t index);
     void stopPlayback();
     void adjustVolume(int delta);

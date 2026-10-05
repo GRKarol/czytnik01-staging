@@ -14,6 +14,9 @@ static const char* TAG = "AudioRecorder";
 
 namespace {
 constexpr i2s_port_t kI2sPort = I2S_NUM_0;
+// Above the font/book/update downloads (priority 1, also on core 0): sharing
+// time slices with them, a take answered Stop late and lost samples.
+constexpr UBaseType_t kAudioTaskPriority = 5;
 
 // ES8311 register addresses
 constexpr uint8_t kEs8311ResetReg = 0x00;
@@ -157,7 +160,7 @@ bool AudioRecorder::startRecording(const char* absolutePath) {
     recordingPeakLevel_ = 0;
 
     BaseType_t result = xTaskCreatePinnedToCore(
-        recordTaskEntry, "rec", kRecordTaskStackSize, this, 1, &recordTask_, 0);
+        recordTaskEntry, "rec", kRecordTaskStackSize, this, kAudioTaskPriority, &recordTask_, 0);
 
     if (result != pdPASS) {
         ESP_LOGE(TAG, "Failed to create record task");
@@ -169,27 +172,29 @@ bool AudioRecorder::startRecording(const char* absolutePath) {
     return true;
 }
 
+void AudioRecorder::requestStopRecording() {
+    if (recording_) stopRequested_ = true;
+}
+
+// Never deletes the record task. A forced vTaskDelete() could land while the
+// task held the card's FAT lock or the I2C bus lock, and both stayed taken for
+// good: the next take, the plugin and then the whole reader hung on them.
+// The task always ends by itself once stopRequested_ is set (i2s_read times
+// out every 100 ms), so a slow stop just takes longer.
 bool AudioRecorder::stopRecording() {
     if (!recording_) return false;
 
-    stopRequested_ = true;
+    requestStopRecording();
 
-    // Wait for task to finish (max 2s)
-    uint32_t waitStart = millis();
-    while (recording_ && (millis() - waitStart) < 2000) {
+    const uint32_t waitStart = millis();
+    while (recording_ && (millis() - waitStart) < 1500) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     if (recording_) {
-        // Force kill
-        if (recordTask_) {
-            vTaskDelete(recordTask_);
-            recordTask_ = nullptr;
-        }
-        deinitI2s();
-        recording_ = false;
+        ESP_LOGW(TAG, "Recording still finishing after 1.5 s");
+        return false;
     }
-
     ESP_LOGI(TAG, "Recording stopped");
     return true;
 }
@@ -250,7 +255,7 @@ bool AudioRecorder::startPlayback(const char* absolutePath) {
     playbackStartMs_ = millis();
 
     BaseType_t result = xTaskCreatePinnedToCore(
-        playbackTaskEntry, "play", kPlaybackTaskStackSize, this, 1, &playbackTask_, 0);
+        playbackTaskEntry, "play", kPlaybackTaskStackSize, this, kAudioTaskPriority, &playbackTask_, 0);
 
     if (result != pdPASS) {
         ESP_LOGE(TAG, "Failed to create playback task");
@@ -262,25 +267,21 @@ bool AudioRecorder::startPlayback(const char* absolutePath) {
     return true;
 }
 
+// Like stopRecording(): no forced task delete, the task ends by itself.
 bool AudioRecorder::stopPlayback() {
     if (!playing_) return false;
 
     stopRequested_ = true;
 
-    uint32_t waitStart = millis();
+    const uint32_t waitStart = millis();
     while (playing_ && (millis() - waitStart) < 2000) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     if (playing_) {
-        if (playbackTask_) {
-            vTaskDelete(playbackTask_);
-            playbackTask_ = nullptr;
-        }
-        deinitI2s();
-        playing_ = false;
+        ESP_LOGW(TAG, "Playback still finishing after 2 s");
+        return false;
     }
-
     ESP_LOGI(TAG, "Playback stopped");
     return true;
 }
@@ -369,7 +370,9 @@ bool AudioRecorder::configureI2sForRecording() {
     config.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
     config.communication_format = I2S_COMM_FORMAT_STAND_I2S;
     config.intr_alloc_flags = 0;
-    config.dma_buf_count = 8;
+    // 256 ms of audio: a card write held up by FAT allocation no longer
+    // overruns the ring (8 buffers held 128 ms).
+    config.dma_buf_count = 16;
     config.dma_buf_len = 256;
     config.use_apll = false;
     config.tx_desc_auto_clear = false;
