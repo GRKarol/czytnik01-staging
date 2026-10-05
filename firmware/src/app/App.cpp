@@ -46,6 +46,9 @@ constexpr uint32_t kFontDownloadTaskStackBytes = 20480;
 // short of a restart. Treat a check that's run long past its own internal
 // timeouts as dead and release the lock.
 constexpr uint32_t kOtaCheckWatchdogTimeoutMs = 45000;
+// The phone network at boot waits at most this long (from power-on) for the
+// update check to finish with the radio.
+constexpr uint32_t kBootApWaitForOtaCheckMs = 25000;
 // How often maybeAutoDownloadFonts() re-checks for saved Wi-Fi once the pack
 // isn't complete yet — deliberately not "once at boot only", since the user
 // may pair the Flower app and save Wi-Fi credentials well after first boot,
@@ -933,6 +936,7 @@ App::App() : button_(BoardConfig::PIN_BOOT_BUTTON), powerButton_(BoardConfig::PI
 void App::begin() {
   BoardConfig::begin();
   PowerGuard::begin();
+  markWifiForegroundTask();
   button_.begin();
   powerButton_.begin();
   bootButtonReleasedSinceBoot_ = !button_.isHeld();
@@ -1163,7 +1167,14 @@ void App::begin() {
 
   maybeAutoCheckForUpdates(bootStartedMs_);
   refreshFontPackComplete();
-  maybeAutoDownloadFonts(bootStartedMs_);
+  // The update check goes first: a font pack download started now held the
+  // radio for minutes, and the check queued behind it never ran. The fonts
+  // come on the next retry (kFontDownloadRetryIntervalMs).
+  if (otaCheckInProgress_) {
+    lastFontDownloadAttemptMs_ = bootStartedMs_;
+  } else {
+    maybeAutoDownloadFonts(bootStartedMs_);
+  }
   // Plugin sync runs in background after first update loop iteration
   // (moved out of boot path to prevent blocking)
 
@@ -1214,6 +1225,17 @@ void App::startBootRadios() {
     Serial.println("[app] BLE off by default (not enabled in settings)");
   }
 
+  bootApPending_ = true;
+}
+
+void App::startBootAccessPoint(uint32_t nowMs) {
+  // The update check started at boot gets the radio first: the phone
+  // network came up over it and the check never ran while the phone stayed
+  // connected. It takes a few seconds; one that hangs is not waited for.
+  if (otaCheckInProgress_ && nowMs - bootStartedMs_ < kBootApWaitForOtaCheckMs) {
+    return;
+  }
+  bootApPending_ = false;
   // Auto-start companion sync AP for 30 seconds on boot.
   // If no client connects within the timeout, AP shuts down to save power
   // (unless the Wi-Fi session setting keeps it up, see sessionWifiHold()).
@@ -1377,6 +1399,9 @@ void App::update(uint32_t nowMs) {
   loadPendingBootBook(nowMs);
   if (bootRadiosPending_ && state_ != AppState::Booting) {
     startBootRadios();
+  }
+  if (bootApPending_) {
+    startBootAccessPoint(nowMs);
   }
   // Deliberately not auto-opening UpdateConfirm here: an update found mid-read
   // used to yank the user out of Playing/Paused into a blocking Update/Skip
@@ -5478,6 +5503,9 @@ void App::scanWifiNetworks() {
     display_.renderProgress("Wi-Fi", "Scanning networks", "", 5);
   }
 
+  // A font download in the background has the radio: it stops for the scan
+  // (switching the mode under its session crashed the Wi-Fi driver).
+  const bool radioLocked = takeWifiSession();
   WiFi.persistent(false);
   WiFi.disconnect(true, false);
   WiFi.mode(WIFI_STA);
@@ -5510,6 +5538,9 @@ void App::scanWifiNetworks() {
   WiFi.scanDelete();
   WiFi.disconnect(true, false);
   WiFi.mode(WIFI_OFF);
+  if (radioLocked) {
+    xSemaphoreGive(wifiSessionMutex());
+  }
 
   if (wifiNetworks_.empty()) {
     if (wifiFlowFromWizard_) {
@@ -7679,7 +7710,7 @@ void countAssetDownloadChunk(void *, const char *, const char *, const char *, i
 
 bool downloadAssetWithRetry(OtaUpdater &updater, const OtaUpdater::Config &config, const String &assetName,
                             const String &destPath, String &errorDetail) {
-  for (int attempt = 1; attempt <= kAssetDownloadAttempts; ++attempt) {
+  for (int attempt = 1; attempt <= kAssetDownloadAttempts && !wifiYieldRequested(); ++attempt) {
     errorDetail = "";
     if (updater.downloadAsset(config, assetName, "", destPath, errorDetail, &countAssetDownloadChunk, nullptr)) {
       return true;
@@ -7804,7 +7835,8 @@ void App::fontDownloadTask(void *params) {
       queuedResult.wifiFailed = true;
       Serial.println("[fonts] Wi-Fi connect failed, will retry later");
     }
-    for (int pass = 1; connected && pass <= kFontDownloadPasses && !missing.empty(); ++pass) {
+    for (int pass = 1; connected && pass <= kFontDownloadPasses && !missing.empty() && !wifiYieldRequested();
+         ++pass) {
       if (pass > 1) {
         Serial.printf("[fonts] pass %d: %u font(s) still missing\n", pass, static_cast<unsigned>(missing.size()));
         delay(2000);
@@ -7820,6 +7852,13 @@ void App::fontDownloadTask(void *params) {
       }
       std::vector<DisplayManager::ReaderTypeface> failed;
       for (DisplayManager::ReaderTypeface typeface : missing) {
+        // The reader wants the radio (phone network, Update): stop here,
+        // the rest comes on the next run.
+        if (wifiYieldRequested()) {
+          failed.push_back(typeface);
+          queuedResult.wifiFailed = true;
+          continue;
+        }
         const String base = DisplayManager::sdFontFileBaseName(typeface);
         if (base.isEmpty()) {
           continue;
@@ -7985,7 +8024,7 @@ void App::bookDownloadTask(void *params) {
     queuedResult.wifiFailed = true;
     Serial.println("[books] Wi-Fi connect failed, skipping starter books this attempt");
   } else {
-    for (uint8_t i = 1; i <= kStarterBookCountPerLanguage; ++i) {
+    for (uint8_t i = 1; i <= kStarterBookCountPerLanguage && !wifiYieldRequested(); ++i) {
       const String assetName = "starter-" + code + "-" + String(i) + ".rsvp";
       const String destPath = "/books/books/" + assetName;
       String errorDetail;

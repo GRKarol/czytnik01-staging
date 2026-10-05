@@ -350,6 +350,7 @@ class App {
   // the Atkinson fallback for the rest of the session.
   void maybeRetryTypographyFontLoad(uint32_t nowMs);
   void startBootRadios();
+  void startBootAccessPoint(uint32_t nowMs);
   uint8_t currentBrightnessPercent() const;
   // Smooth brightness setting (percent); also keeps the old 5-step index in
   // sync for the companion API.
@@ -1721,6 +1722,8 @@ class App {
   bool typographyFontRetryPending_ = false;
   // Bluetooth and the phone network wait for the end of the boot splash.
   bool bootRadiosPending_ = false;
+  // The phone network waits for the boot update check (startBootAccessPoint).
+  bool bootApPending_ = false;
   uint32_t typographyFontRetryLastAttemptMs_ = 0;
   uint32_t typographyFontRetryDeadlineMs_ = 0;
 };

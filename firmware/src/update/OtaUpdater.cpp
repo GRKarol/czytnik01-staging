@@ -13,6 +13,7 @@
 #include <WiFiClientSecure.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 
 #ifndef RSVP_FIRMWARE_VERSION
 #define RSVP_FIRMWARE_VERSION "dev"
@@ -31,6 +32,40 @@
 SemaphoreHandle_t wifiSessionMutex() {
   static SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
   return mutex;
+}
+
+namespace {
+TaskHandle_t g_wifiForegroundTask = nullptr;
+std::atomic<bool> g_wifiYieldRequested{false};
+
+bool onWifiForegroundTask() {
+  return g_wifiForegroundTask != nullptr && xTaskGetCurrentTaskHandle() == g_wifiForegroundTask;
+}
+
+// Background sessions (font_dl, book_dl, ota_check) give up when the UI
+// task asks for the radio.
+bool backgroundShouldYield() { return g_wifiYieldRequested.load() && !onWifiForegroundTask(); }
+}  // namespace
+
+void markWifiForegroundTask() { g_wifiForegroundTask = xTaskGetCurrentTaskHandle(); }
+
+bool wifiYieldRequested() { return g_wifiYieldRequested.load(); }
+
+bool takeWifiSession(uint32_t foregroundTimeoutMs) {
+  if (!onWifiForegroundTask()) {
+    return xSemaphoreTake(wifiSessionMutex(), portMAX_DELAY) == pdTRUE;
+  }
+  if (xSemaphoreTake(wifiSessionMutex(), 0) == pdTRUE) {
+    return true;
+  }
+  Serial.println("[wifi] radio busy with a background download - asking it to stop");
+  g_wifiYieldRequested = true;
+  const bool taken = xSemaphoreTake(wifiSessionMutex(), pdMS_TO_TICKS(foregroundTimeoutMs)) == pdTRUE;
+  g_wifiYieldRequested = false;
+  if (!taken) {
+    Serial.printf("[wifi] radio still busy after %lu ms\n", static_cast<unsigned long>(foregroundTimeoutMs));
+  }
+  return taken;
 }
 
 namespace {
@@ -425,7 +460,9 @@ bool OtaUpdater::connectWiFi(const Config &config, StatusCallback callback,
                              void *context) const {
   // Blokuje, aż zwolni się poprzednia sesja (font_dl/book_dl/ekran Wi-Fi) —
   // patrz komentarz przy wifiSessionMutex() na początku pliku.
-  xSemaphoreTake(wifiSessionMutex(), portMAX_DELAY);
+  if (!takeWifiSession()) {
+    return false;
+  }
 
   // The phone-sync access point (CompanionSyncManager) is up: WiFi.mode(STA)
   // here and WIFI_OFF at the end of the session would take the "Flower-..."
@@ -445,7 +482,8 @@ bool OtaUpdater::connectWiFi(const Config &config, StatusCallback callback,
   WiFi.begin(config.wifiSsid.c_str(), config.wifiPassword.c_str());
 
   const uint32_t startMs = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startMs < kWifiConnectTimeoutMs) {
+  while (WiFi.status() != WL_CONNECTED && millis() - startMs < kWifiConnectTimeoutMs &&
+         !backgroundShouldYield()) {
     const uint32_t elapsedMs = millis() - startMs;
     const int progress = 5 + static_cast<int>((elapsedMs * 15) / kWifiConnectTimeoutMs);
     reportStatus(callback, context, kStatusTitle, "Connecting Wi-Fi", config.wifiSsid, progress);
@@ -453,7 +491,7 @@ bool OtaUpdater::connectWiFi(const Config &config, StatusCallback callback,
   }
 
   bool connected = WiFi.status() == WL_CONNECTED;
-  if (!connected) {
+  if (!connected && !backgroundShouldYield()) {
     // Primary network isn't in range or its saved password is stale — try
     // any other network we know about that's actually visible right now
     // (e.g. the reader travelled back into range of a previously-used Wi-Fi).
@@ -529,7 +567,10 @@ OtaUpdater::WifiFailure failureForReason(uint8_t reason) {
 bool OtaUpdater::connectWiFiUserAttempt(const Config &config, WifiFailure &failure, StatusCallback callback,
                                         void *context) const {
   failure = WifiFailure::None;
-  xSemaphoreTake(wifiSessionMutex(), portMAX_DELAY);
+  if (!takeWifiSession()) {
+    failure = WifiFailure::Busy;
+    return false;
+  }
   if ((WiFi.getMode() & WIFI_MODE_AP) != 0) {
     xSemaphoreGive(wifiSessionMutex());
     failure = WifiFailure::Busy;
@@ -1033,6 +1074,10 @@ bool OtaUpdater::downloadAsset(const Config &config, const String &assetName,
                                const String &tagName, const String &destPath,
                                String &errorDetail, StatusCallback callback,
                                void *context) const {
+  if (backgroundShouldYield()) {
+    errorDetail = "Radio needed by the reader";
+    return false;
+  }
   // Straight to the release's public download link: no api.github.com call
   // per file. The API allows 60 unauthenticated requests an hour per IP
   // (the font pack alone is 34 files) and its JSON, cut at 32 KB here, only
@@ -1110,8 +1155,13 @@ bool OtaUpdater::downloadAsset(const Config &config, const String &assetName,
   uint32_t lastDataMs = millis();
   bool stalled = false;
   bool writeFailed = false;
+  bool yielded = false;
   while (dlHttp.connected() || stream->available()) {
     if (reportedSize > 0 && totalWritten >= static_cast<size_t>(reportedSize)) {
+      break;
+    }
+    if (backgroundShouldYield()) {
+      yielded = true;
       break;
     }
 
@@ -1151,9 +1201,10 @@ bool OtaUpdater::downloadAsset(const Config &config, const String &assetName,
   dlHttp.end();
 
   const bool sizeMatches = reportedSize <= 0 || totalWritten == static_cast<size_t>(reportedSize);
-  if (stalled || writeFailed || !sizeMatches || totalWritten == 0) {
+  if (yielded || stalled || writeFailed || !sizeMatches || totalWritten == 0) {
     SD_MMC.remove(tmpPath);
-    errorDetail = stalled ? "Download stalled" : (writeFailed ? "SD write failed" : "Incomplete download");
+    errorDetail = yielded ? "Radio needed by the reader"
+                          : (stalled ? "Download stalled" : (writeFailed ? "SD write failed" : "Incomplete download"));
     return false;
   }
   // Read back what the card holds: a write the FAT layer accepted but did

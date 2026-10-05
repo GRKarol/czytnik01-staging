@@ -620,15 +620,18 @@ void CompanionSyncManager::end() {
   stopServer();
 
   // Same mutex as startAccessPoint() above — this teardown races the exact
-  // same background download tasks the same way.
-  xSemaphoreTake(wifiSessionMutex(), portMAX_DELAY);
+  // same background download tasks the same way. Waits a limited time: past
+  // it the network goes down anyway rather than freezing the screen.
+  const bool locked = takeWifiSession();
   if (networkMode_ == NetworkMode::Station) {
     WiFi.disconnect(true, false);
   } else if (networkMode_ == NetworkMode::AccessPoint) {
     WiFi.softAPdisconnect(true);
   }
   WiFi.mode(WIFI_OFF);
-  xSemaphoreGive(wifiSessionMutex());
+  if (locked) {
+    xSemaphoreGive(wifiSessionMutex());
+  }
   preferences_.end();
 
   networkMode_ = NetworkMode::None;
@@ -870,7 +873,12 @@ bool CompanionSyncManager::startAccessPoint() {
   // WiFi.mode() calls, crashing with the same LoadProhibited PANIC that hit
   // the STA-side teardown race (see wifiSessionMutex()'s doc comment) — the
   // reboot-back-to-language-screen bug on "Connect your reader to the app".
-  xSemaphoreTake(wifiSessionMutex(), portMAX_DELAY);
+  // From the UI loop it asks such a download to stop instead of waiting for
+  // the whole font pack (v0.4.05 froze at boot on exactly that).
+  if (!takeWifiSession()) {
+    Serial.println("[sync] radio busy - access point not started");
+    return false;
+  }
   WiFi.mode(WIFI_AP);
   const bool apStarted = WiFi.softAP(ssid.c_str());
   xSemaphoreGive(wifiSessionMutex());

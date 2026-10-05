@@ -13,6 +13,17 @@
 // downloads.
 SemaphoreHandle_t wifiSessionMutex();
 
+// The task running the UI (App::begin calls this once). It never waits for
+// the lock without limit: a font pack download held it for minutes and the
+// screen froze on the phone network or on Update.
+void markWifiForegroundTask();
+// Takes the lock. From the UI task it asks the background downloads to give
+// the radio up (they stop at the next chunk) and waits at most timeoutMs;
+// background tasks wait as long as it takes.
+bool takeWifiSession(uint32_t foregroundTimeoutMs = 30000);
+// True while the UI task waits for the radio: background sessions stop.
+bool wifiYieldRequested();
+
 // Set by tools/pio_set_version.py from RSVP_OTA_REPO (release CI).
 #ifndef RSVP_OTA_DEFAULT_REPO
 #define RSVP_OTA_DEFAULT_REPO "czytnik01"
