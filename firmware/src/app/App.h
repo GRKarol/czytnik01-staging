@@ -349,6 +349,7 @@ class App {
   // repaints the instant it succeeds, instead of leaving the reader stuck on
   // the Atkinson fallback for the rest of the session.
   void maybeRetryTypographyFontLoad(uint32_t nowMs);
+  void startBootRadios();
   uint8_t currentBrightnessPercent() const;
   // Smooth brightness setting (percent); also keeps the old 5-step index in
   // sync for the companion API.
@@ -1290,6 +1291,8 @@ class App {
   // Loading step downloads: books first, then fonts (welcomeFontsStarted_);
   // the stall clock restarts whenever a file finishes.
   bool welcomeFontsStarted_ = false;
+  // Font task runs started by the loading step; it waits for the whole pack.
+  uint8_t welcomeFontRounds_ = 0;
   unsigned welcomeAssetsProgressMark_ = 0;
   uint32_t welcomeAssetsProgressMs_ = 0;
   size_t welcomeChipPage_ = 0;
@@ -1716,6 +1719,8 @@ class App {
   NavMode navMode_ = NavMode::Modern;
   DisplayManager::TypographyConfig typographyConfig_;
   bool typographyFontRetryPending_ = false;
+  // Bluetooth and the phone network wait for the end of the boot splash.
+  bool bootRadiosPending_ = false;
   uint32_t typographyFontRetryLastAttemptMs_ = 0;
   uint32_t typographyFontRetryDeadlineMs_ = 0;
 };

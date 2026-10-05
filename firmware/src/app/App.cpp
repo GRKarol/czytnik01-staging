@@ -3,6 +3,7 @@
 #include <SD_MMC.h>
 #include <esp_sleep.h>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <esp_ota_ops.h>
 #include <qrcode.h>
 #include <WiFi.h>
@@ -17,6 +18,7 @@
 #include "app/Translations.h"
 #include "app/generated/StarterTitles.h"
 #include "board/BoardConfig.h"
+#include "board/PowerGuard.h"
 #include "plugins/DeviceServicesBridge.h"
 #include "storage/BookExtras.h"
 
@@ -61,9 +63,9 @@ constexpr uint8_t kStarterBookCountPerLanguage = StarterTitles::kPerLanguage;
 // it just made boot feel slow. The splash now lights at once and the next
 // screen replaces it directly, so this is simply how long the picture shows
 // at least.
-constexpr uint32_t kBootSplashMs = 1200;
+constexpr uint32_t kBootSplashMs = 700;
 constexpr uint32_t kBootSplashBlackMs = 0;
-constexpr uint32_t kBootSplashFadeMs = 600;
+constexpr uint32_t kBootSplashFadeMs = 300;
 // Extra budget (from bootStartedMs_, not on top of the splash) to let a
 // pending SD-backed typeface load finish before handing off to the reader.
 // Almost never fully used — the splash animation itself already burns ~1.8s
@@ -71,7 +73,7 @@ constexpr uint32_t kBootSplashFadeMs = 600;
 // that. Only a genuinely slow card eats into this, and even then it just
 // falls back to Atkinson and keeps retrying in the background afterward
 // (see maybeRetryTypographyFontLoad) instead of freezing indefinitely.
-constexpr uint32_t kBootFontWaitBudgetMs = 4000;
+constexpr uint32_t kBootFontWaitBudgetMs = 1500;
 constexpr uint32_t kWpmFeedbackMs = 900;
 constexpr uint32_t kPowerOffHoldMs = 1600;
 constexpr uint32_t kPowerOffReleaseWaitMs = 4000;
@@ -105,7 +107,7 @@ constexpr uint32_t kArmedConfirmWindowMs = 2500;
 // How long a tapped grid button shows solid focusColor before its action
 // actually runs — short enough to feel instant, long enough to register as
 // "yes, that tap landed" before the screen changes underneath it.
-constexpr uint32_t kPressFlashMs = 140;
+constexpr uint32_t kPressFlashMs = 60;
 // Grid tap targets at or above this canonical index are Nano UI actions
 // (tabs, pager, shortcut tiles), run by App::runNanoAction() in
 // AppNano.inl instead of the screen's select*Item() handler.
@@ -201,6 +203,25 @@ constexpr uint32_t kUsbTransferExitHoldMs = 1200;
 constexpr size_t kTimeEstimateBlockWords = 256;
 constexpr size_t kTimeEstimateBlocksPerUpdate = 1;
 constexpr uint32_t kTimeEstimateProgressLogMs = 5000;
+
+// Logs a step slow enough to feel on a tap ("[perf] renderMenu 230 ms"):
+// taps were reported landing half a second late.
+class SlowStepLog {
+ public:
+  explicit SlowStepLog(const char *what, uint32_t thresholdMs = 80)
+      : what_(what), thresholdMs_(thresholdMs), startMs_(millis()) {}
+  ~SlowStepLog() {
+    const uint32_t tookMs = millis() - startMs_;
+    if (tookMs >= thresholdMs_) {
+      Serial.printf("[perf] %s %lu ms\n", what_, static_cast<unsigned long>(tookMs));
+    }
+  }
+
+ private:
+  const char *what_;
+  uint32_t thresholdMs_;
+  uint32_t startMs_;
+};
 constexpr uint32_t kNominalBatteryRuntimeMinutes = 330;
 constexpr uint8_t kBatteryDisplayHysteresisPercent = 2;
 constexpr uint8_t kBatteryRuntimeMinDropPercent = 3;
@@ -911,6 +932,7 @@ App::App() : button_(BoardConfig::PIN_BOOT_BUTTON), powerButton_(BoardConfig::PI
 
 void App::begin() {
   BoardConfig::begin();
+  PowerGuard::begin();
   button_.begin();
   powerButton_.begin();
   bootButtonReleasedSinceBoot_ = !button_.isHeld();
@@ -1103,13 +1125,17 @@ void App::begin() {
     // now that the card is actually mounted.
     applyTypographySettings(bootStartedMs_, false);
   }
-  if (!display_.isActiveTypefaceLoaded()) {
-    // Still not loaded — either storage_.begin() itself failed on this cold
+  // Retried only while the card itself is slow: a face whose .fnt files are
+  // not on the card yet can't load, and each retry redrew the screen every
+  // 750 ms for 20 s after boot (and held the splash 4 s). It comes in when
+  // the download brings it (pollFontDownloadResult).
+  if (!display_.isActiveTypefaceLoaded() &&
+      (!storageReady_ || DisplayManager::isTypefaceAvailableOnSd(typographyConfig_.typeface))) {
+    // Still not loaded — storage_.begin() itself failed on this cold
     // power-on (card needs longer than its internal retry loop allows), or
-    // the .fnt pair just hasn't finished the Wi-Fi auto-download yet. Keep
-    // retrying at a low rate from the main loop (see
-    // maybeRetryTypographyFontLoad) instead of settling on Atkinson for the
-    // whole session.
+    // the read failed once. Keep retrying at a low rate from the main loop
+    // (see maybeRetryTypographyFontLoad) instead of settling on Atkinson for
+    // the whole session.
     typographyFontRetryPending_ = true;
     typographyFontRetryLastAttemptMs_ = bootStartedMs_;
     typographyFontRetryDeadlineMs_ = bootStartedMs_ + 20000;
@@ -1141,42 +1167,13 @@ void App::begin() {
   // Plugin sync runs in background after first update loop iteration
   // (moved out of boot path to prevent blocking)
 
-  // Auto-start BLE peripheral tylko jeśli użytkownik wcześniej włączył je w
-  // Ustawienia > Łączność > Bluetooth (domyślnie wyłączone — patrz
-  // kPrefBleEnabled, ustawiane przez selectSettingsConnectivityItem()).
-  extern BleApi *g_bleApiPtr;
-  g_bleApiPtr = &ble_;
-  if (preferences_.getBool(kPrefBleEnabled, false)) {
-    ble_.begin(this);
-    Serial.println("========================================");
-    Serial.printf("FLOWER BLE NAME: %s\n", ble_.deviceName().c_str());
-    Serial.printf("FLOWER TOKEN: %s\n", ble_.currentToken().c_str());
-    Serial.printf("FLOWER QR: %s\n", ble_.qrPayload().c_str());
-    Serial.println("========================================");
-  } else {
-    Serial.println("[app] BLE off by default (not enabled in settings)");
-  }
-
-  // Auto-start companion sync AP for 30 seconds on boot.
-  // If no client connects within the timeout, AP shuts down to save power
-  // (unless the Wi-Fi session setting keeps it up, see sessionWifiHold()).
   wifiSessionMode_ = preferences_.getUChar(kPrefWifiSession, kWifiSessionStandard);
   if (wifiSessionMode_ >= kWifiSessionModeCount) {
     wifiSessionMode_ = kWifiSessionStandard;
   }
-  {
-    CompanionSyncManager::Config syncConfig;
-    syncConfig.wifiSsid = "";
-    syncConfig.wifiPassword = "";
-    if (companionSync_.begin(syncConfig)) {
-      autoSyncActive_ = true;
-      autoSyncStartedMs_ = millis();
-      autoSyncClientConnected_ = false;
-      Serial.println("[app] auto-sync AP started (30s timeout)");
-    } else {
-      Serial.println("[app] auto-sync AP failed to start");
-    }
-  }
+  // Bluetooth and the phone network come up right after the splash
+  // (startBootRadios): started here they added most of a second to it.
+  bootRadiosPending_ = true;
 
   Serial.printf("[app] WPM=%u interval=%lu ms\n", reader_.wpm(),
                 static_cast<unsigned long>(reader_.wordIntervalMs()));
@@ -1199,7 +1196,50 @@ void App::begin() {
   esp_ota_mark_app_valid_cancel_rollback();
 }
 
+void App::startBootRadios() {
+  bootRadiosPending_ = false;
+  // Auto-start BLE peripheral tylko jeśli użytkownik wcześniej włączył je w
+  // Ustawienia > Łączność > Bluetooth (domyślnie wyłączone — patrz
+  // kPrefBleEnabled, ustawiane przez selectSettingsConnectivityItem()).
+  extern BleApi *g_bleApiPtr;
+  g_bleApiPtr = &ble_;
+  if (preferences_.getBool(kPrefBleEnabled, false)) {
+    ble_.begin(this);
+    Serial.println("========================================");
+    Serial.printf("FLOWER BLE NAME: %s\n", ble_.deviceName().c_str());
+    Serial.printf("FLOWER TOKEN: %s\n", ble_.currentToken().c_str());
+    Serial.printf("FLOWER QR: %s\n", ble_.qrPayload().c_str());
+    Serial.println("========================================");
+  } else {
+    Serial.println("[app] BLE off by default (not enabled in settings)");
+  }
+
+  // Auto-start companion sync AP for 30 seconds on boot.
+  // If no client connects within the timeout, AP shuts down to save power
+  // (unless the Wi-Fi session setting keeps it up, see sessionWifiHold()).
+  // Not during the first-run wizard: its Wi-Fi step and the downloads on
+  // the loading step need the radio (OtaUpdater refuses it while this
+  // network is up), and the pairing step starts the network itself.
+  if (!preferences_.getBool(kPrefSetupDone, false)) {
+    Serial.println("[app] first-run wizard: phone network waits for the pairing step");
+  } else {
+    CompanionSyncManager::Config syncConfig;
+    syncConfig.wifiSsid = "";
+    syncConfig.wifiPassword = "";
+    if (companionSync_.begin(syncConfig)) {
+      autoSyncActive_ = true;
+      autoSyncStartedMs_ = millis();
+      autoSyncClientConnected_ = false;
+      Serial.println("[app] auto-sync AP started (30s timeout)");
+    } else {
+      Serial.println("[app] auto-sync AP failed to start");
+    }
+  }
+}
+
 void App::update(uint32_t nowMs) {
+  PowerGuard::mainLoopAlive(nowMs);
+  const SlowStepLog loopLog("loop pass", 250);
   button_.update(nowMs);
   powerButton_.update(nowMs);
 
@@ -1335,6 +1375,9 @@ void App::update(uint32_t nowMs) {
   updateWelcomeReadingModePreview(nowMs);
   updateState(nowMs);
   loadPendingBootBook(nowMs);
+  if (bootRadiosPending_ && state_ != AppState::Booting) {
+    startBootRadios();
+  }
   // Deliberately not auto-opening UpdateConfirm here: an update found mid-read
   // used to yank the user out of Playing/Paused into a blocking Update/Skip
   // screen. pollOtaCheckResult() already surfaces it as a ">> Update vX.Y.Z"
@@ -6793,6 +6836,9 @@ std::atomic<uint8_t> g_fontDlDone{0};
 std::atomic<uint8_t> g_fontDlTotal{0};
 std::atomic<uint8_t> g_bookDlDone{0};
 std::atomic<uint8_t> g_bookDlTotal{0};
+// Bumped for every chunk a font or book download writes, so a slow file
+// still counts as progress on the loading screen.
+std::atomic<uint32_t> g_assetDlTicks{0};
 constexpr uint32_t kWelcomeTimedMessageMs = 3000;
 constexpr uint32_t kWelcomeScreenFrameMs = 150;
 // Forces a look at the download QR before the corner "Next" appears —
@@ -7623,12 +7669,19 @@ namespace {
 // A dropped TLS session or a slow GitHub hop fails one file, not the whole
 // pack: each file gets a few tries before the task moves on without it.
 constexpr int kAssetDownloadAttempts = 3;
+// Files still missing after a pass get another one (on a fresh connection
+// when the old one dropped), up to this many passes in all.
+constexpr int kFontDownloadPasses = 3;
+
+void countAssetDownloadChunk(void *, const char *, const char *, const char *, int) {
+  g_assetDlTicks.fetch_add(1);
+}
 
 bool downloadAssetWithRetry(OtaUpdater &updater, const OtaUpdater::Config &config, const String &assetName,
                             const String &destPath, String &errorDetail) {
   for (int attempt = 1; attempt <= kAssetDownloadAttempts; ++attempt) {
     errorDetail = "";
-    if (updater.downloadAsset(config, assetName, "", destPath, errorDetail)) {
+    if (updater.downloadAsset(config, assetName, "", destPath, errorDetail, &countAssetDownloadChunk, nullptr)) {
       return true;
     }
     Serial.printf("[dl] %s try %d/%d failed: %s\n", assetName.c_str(), attempt, kAssetDownloadAttempts,
@@ -7737,15 +7790,35 @@ void App::fontDownloadTask(void *params) {
 
   FontDownloadResult queuedResult;
   queuedResult.totalMissing = static_cast<uint8_t>(missing.size());
-  g_fontDlDone = 0;
-  g_fontDlTotal = queuedResult.totalMissing;
+  // Counted over the whole pack, so a second run goes on from where the
+  // first stopped instead of starting again at 0.
+  const uint8_t packSize = static_cast<uint8_t>(static_cast<uint8_t>(DisplayManager::ReaderTypeface::Count) -
+                                                static_cast<uint8_t>(DisplayManager::ReaderTypeface::Literata));
+  g_fontDlTotal = packSize;
+  g_fontDlDone = static_cast<uint8_t>(packSize - missing.size());
 
   if (!missing.empty()) {
     OtaUpdater updater;
-    if (!updater.connectWiFi(taskParams->config, nullptr, nullptr)) {
+    bool connected = updater.connectWiFi(taskParams->config, nullptr, nullptr);
+    if (!connected) {
       queuedResult.wifiFailed = true;
       Serial.println("[fonts] Wi-Fi connect failed, will retry later");
-    } else {
+    }
+    for (int pass = 1; connected && pass <= kFontDownloadPasses && !missing.empty(); ++pass) {
+      if (pass > 1) {
+        Serial.printf("[fonts] pass %d: %u font(s) still missing\n", pass, static_cast<unsigned>(missing.size()));
+        delay(2000);
+        if (WiFi.status() != WL_CONNECTED) {
+          updater.disconnectWiFi();
+          connected = updater.connectWiFi(taskParams->config, nullptr, nullptr);
+          if (!connected) {
+            queuedResult.wifiFailed = true;
+            Serial.println("[fonts] Wi-Fi reconnect failed, will retry later");
+            break;
+          }
+        }
+      }
+      std::vector<DisplayManager::ReaderTypeface> failed;
       for (DisplayManager::ReaderTypeface typeface : missing) {
         const String base = DisplayManager::sdFontFileBaseName(typeface);
         if (base.isEmpty()) {
@@ -7756,16 +7829,14 @@ void App::fontDownloadTask(void *params) {
         const bool baseOk = SD_MMC.exists("/fonts/" + base + ".fnt") ||
                             downloadAssetWithRetry(updater, taskParams->config, base + ".fnt",
                                                    "/fonts/" + base + ".fnt", errorDetail);
-        if (!baseOk) {
-          Serial.printf("[fonts] %s.fnt failed: %s\n", base.c_str(), errorDetail.c_str());
-          continue;
-        }
-
-        const bool mediumOk = SD_MMC.exists("/fonts/" + base + "_70.fnt") ||
-                              downloadAssetWithRetry(updater, taskParams->config, base + "_70.fnt",
-                                                     "/fonts/" + base + "_70.fnt", errorDetail);
+        const bool mediumOk = baseOk && (SD_MMC.exists("/fonts/" + base + "_70.fnt") ||
+                                         downloadAssetWithRetry(updater, taskParams->config, base + "_70.fnt",
+                                                                "/fonts/" + base + "_70.fnt", errorDetail));
         if (!mediumOk) {
-          Serial.printf("[fonts] %s_70.fnt failed: %s\n", base.c_str(), errorDetail.c_str());
+          Serial.printf("[fonts] %s failed: %s (heap %u, largest %u)\n", base.c_str(), errorDetail.c_str(),
+                        static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                        static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)));
+          failed.push_back(typeface);
           continue;
         }
 
@@ -7778,8 +7849,11 @@ void App::fontDownloadTask(void *params) {
         }
 
         queuedResult.downloaded++;
-        g_fontDlDone = queuedResult.downloaded;
+        g_fontDlDone.fetch_add(1);
       }
+      missing.swap(failed);
+    }
+    if (connected) {
       updater.disconnectWiFi();
     }
   }
@@ -7808,6 +7882,11 @@ void App::pollFontDownloadResult(uint32_t nowMs) {
     if (result.downloaded > 0) {
       if (refreshFontPackComplete()) {
         Serial.println("[fonts] font pack complete");
+      }
+      // The chosen face was waiting for its files: switch to it now.
+      if (!display_.isActiveTypefaceLoaded() &&
+          DisplayManager::isTypefaceAvailableOnSd(typographyConfig_.typeface)) {
+        applyTypographySettings(millis(), state_ == AppState::Paused || state_ == AppState::Menu);
       }
       // Rebuild the pickers in place if open right now, so the newly
       // downloaded fonts show up without a menu round-trip.
@@ -11115,6 +11194,7 @@ void App::enterPowerOff(uint32_t nowMs) {
   }
 
   powerOffStarted_ = true;
+  PowerGuard::setShuttingDown(true);
   Serial.println("[app] powering off; hold PWR to start again");
   saveReadingPosition(true);
   pausedTouch_.active = false;
@@ -11131,7 +11211,12 @@ void App::enterPowerOff(uint32_t nowMs) {
   display_.prepareForSleep();
 
   activeBookStore_.close();
-  storage_.end();
+  // A font or book download may still be writing to the card from its own
+  // task: unmounting under it could hang the power-off. The power goes
+  // anyway, so the card is left as it is then.
+  if (!fontDownloadInProgress_ && !bookDownloadInProgress_) {
+    storage_.end();
+  }
   touch_.end();
   touchInitialized_ = false;
   Serial.flush();
@@ -11179,6 +11264,7 @@ void App::wakeFromSleep() {
   powerButtonLongPressHandled_ = false;
   powerTapPending_ = false;
   powerOffStarted_ = false;
+  PowerGuard::setShuttingDown(false);
   updateBatteryStatus(nowMs, true);
   storage_.setStatusCallback(&App::handleStorageStatus, this);
   pausedTouch_.active = false;
@@ -11559,6 +11645,7 @@ int App::findBookIndexByPath(const String &path) const {
 }
 
 void App::renderMenu() {
+  const SlowStepLog slowLog("renderMenu");
   applyReaderUiOrientation();
   if (renderExtraScreen()) {
     return;
@@ -12491,6 +12578,7 @@ String App::phantomAfterText() const {
 }
 
 void App::renderActiveReader(uint32_t nowMs) {
+  const SlowStepLog slowLog("renderActiveReader");
   if (pendingBootBookLoad_) {
     display_.renderStatus(tr(TrKey::LoadingBook), currentBookTitle_,
                         tr(TrKey::PleaseWait));

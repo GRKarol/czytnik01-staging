@@ -24,6 +24,10 @@ class TouchHandler {
   void end();
   bool poll(TouchEvent &event);
   void cancel();
+  // Drops the touch going on now and reports nothing until the controller
+  // shows no finger once: a finger (or a stale reading) left from before
+  // this point can't become a press.
+  void ignoreUntilReleased();
   void setUiOrientation(BoardConfig::UiOrientation orientation);
   void setUiRotated180(bool rotated180);
 
@@ -36,6 +40,7 @@ class TouchHandler {
   uint8_t consecutiveReadFailures_ = 0;
   uint8_t emptyTouchSamples_ = 0;
   bool touchActive_ = false;
+  bool waitForRelease_ = false;
   BoardConfig::UiOrientation uiOrientation_ =
       BoardConfig::UI_ROTATED_180 ? BoardConfig::UiOrientation::LandscapeFlipped
                                   : BoardConfig::UiOrientation::Landscape;

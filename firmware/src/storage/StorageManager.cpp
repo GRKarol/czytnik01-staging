@@ -1757,6 +1757,14 @@ String readRsvpDirectiveValue(const String &path, const char *directive) {
   return "";
 }
 
+// What the "Opening book" screens call a book: its @title when it has one
+// (the starter books are files named starter-en-1.rsvp and so on), the file
+// name without the extension otherwise.
+String bookStatusLabel(const String &path) {
+  const String title = readRsvpDirectiveValue(path, "@title");
+  return title.isEmpty() ? normalizeDisplayText(displayNameWithoutExtension(path)) : title;
+}
+
 String indexedIndexPathFor(const String &path) { return path + ".ridx"; }
 
 String indexedDataPathFor(const String &path) { return path + ".rdat"; }
@@ -2180,14 +2188,14 @@ bool StorageManager::ensureEpubConverted(const String &epubPath, String &rsvpPat
 
   if (!RSVP_ON_DEVICE_EPUB_CONVERSION) {
     Serial.printf("[storage] EPUB conversion disabled at build time: %s\n", epubPath.c_str());
-    notifyStatus("EPUB unsupported", displayNameForPath(epubPath).c_str(),
+    notifyStatus("EPUB unsupported", bookStatusLabel(epubPath).c_str(),
                  "Build flag is disabled", 100);
     return false;
   }
 
   if (!fileExistsAndHasBytes(epubPath)) {
     Serial.printf("[storage] EPUB source missing or empty: %s\n", epubPath.c_str());
-    notifyStatus("Preparing book", displayNameForPath(epubPath).c_str(), "EPUB missing", 100);
+    notifyStatus("Preparing book", bookStatusLabel(epubPath).c_str(), "EPUB missing", 100);
     return false;
   }
 
@@ -2209,7 +2217,7 @@ bool StorageManager::ensureEpubConverted(const String &epubPath, String &rsvpPat
   Serial.printf("[storage] Preparing EPUB conversion: source=%s output=%s size=%lu bytes\n",
                 epubPath.c_str(), rsvpPath.c_str(), static_cast<unsigned long>(epubBytes));
   logHeapSnapshot("before EPUB conversion");
-  notifyStatus("Preparing book", displayNameForPath(epubPath).c_str(), "Converting EPUB", 0);
+  notifyStatus("Preparing book", bookStatusLabel(epubPath).c_str(), "Converting EPUB", 0);
 
   EpubConverter::Options options;
   options.maxWords = kMaxBookWords;
@@ -2218,7 +2226,7 @@ bool StorageManager::ensureEpubConverted(const String &epubPath, String &rsvpPat
   progressContext.statusCallback = statusCallback_;
   progressContext.statusContext = statusContext_;
   progressContext.title = "Preparing book";
-  progressContext.label = displayNameForPath(epubPath);
+  progressContext.label = bookStatusLabel(epubPath);
   options.progressContext = &progressContext;
 
   const uint32_t startedMs = millis();
@@ -2235,7 +2243,7 @@ bool StorageManager::ensureEpubConverted(const String &epubPath, String &rsvpPat
 
   Serial.printf("[storage] EPUB conversion ready after %lu ms: %s\n",
                 static_cast<unsigned long>(elapsedMs), rsvpPath.c_str());
-  notifyStatus("Preparing book", displayNameForPath(rsvpPath).c_str(), "Conversion complete",
+  notifyStatus("Preparing book", bookStatusLabel(rsvpPath).c_str(), "Conversion complete",
                100);
   return true;
 }
@@ -2476,7 +2484,7 @@ bool StorageManager::buildIndexedBook(const String &path, BookMetadata &metadata
       source.close();
     }
     Serial.printf("[storage-index] cannot open source: %s\n", path.c_str());
-    notifyStatus("Index failed", displayNameForPath(path).c_str(), "File unreadable", 100);
+    notifyStatus("Index failed", bookStatusLabel(path).c_str(), "File unreadable", 100);
     return false;
   }
 
@@ -2485,7 +2493,7 @@ bool StorageManager::buildIndexedBook(const String &path, BookMetadata &metadata
     source.close();
     Serial.printf("[storage-index] unsupported source size: %s (%lu bytes)\n",
                   path.c_str(), static_cast<unsigned long>(sourceBytes));
-    notifyStatus("Index failed", displayNameForPath(path).c_str(),
+    notifyStatus("Index failed", bookStatusLabel(path).c_str(),
                  sourceBytes == 0 ? "No readable words" : "Book too large", 100);
     return false;
   }
@@ -2493,11 +2501,11 @@ bool StorageManager::buildIndexedBook(const String &path, BookMetadata &metadata
   if (!source.seek(0)) {
     source.close();
     Serial.printf("[storage-index] source rewind failed: %s\n", path.c_str());
-    notifyStatus("Index failed", displayNameForPath(path).c_str(), "Source read failed", 100);
+    notifyStatus("Index failed", bookStatusLabel(path).c_str(), "Source read failed", 100);
     return false;
   }
 
-  const String label = displayNameForPath(path);
+  const String label = bookStatusLabel(path);
   notifyStatus("Indexing book", label.c_str(), "Building word index", 0);
 
   const String indexPath = indexedIndexPathFor(path);
@@ -2716,23 +2724,23 @@ bool StorageManager::buildIndexedBook(const String &path, BookMetadata &metadata
 bool StorageManager::ensureIndexedBook(const String &path, BookMetadata &metadata,
                                        bool rsvpFormat, bool allowIndexBuild) {
   if (readIndexedMetadata(path, metadata)) {
-    notifyStatus("Opening book", displayNameForPath(path).c_str(), "Index is current", 45);
+    notifyStatus("Opening book", bookStatusLabel(path).c_str(), "Index is current", 45);
     return true;
   }
 
   if (!allowIndexBuild) {
-    notifyStatus("Index needed", displayNameForPath(path).c_str(), "Open from library", 100);
+    notifyStatus("Index needed", bookStatusLabel(path).c_str(), "Open from library", 100);
     return false;
   }
 
   Serial.printf("[storage-index] rebuilding missing/stale index: %s\n", path.c_str());
-  notifyStatus("Opening book", displayNameForPath(path).c_str(), "Index needs rebuild", 20);
+  notifyStatus("Opening book", bookStatusLabel(path).c_str(), "Index needs rebuild", 20);
   if (!buildIndexedBook(path, metadata, rsvpFormat)) {
     return false;
   }
   if (!readIndexedMetadata(path, metadata)) {
     Serial.printf("[storage-index] freshly built index failed validation: %s\n", path.c_str());
-    notifyStatus("Index failed", displayNameForPath(path).c_str(), "Validation failed", 100);
+    notifyStatus("Index failed", bookStatusLabel(path).c_str(), "Validation failed", 100);
     return false;
   }
   return true;
@@ -2775,7 +2783,7 @@ bool StorageManager::loadIndexedBook(size_t index, IndexedBookStore &store,
   size_t parsedIndex = index;
   if (hasEpubExtension(path)) {
     if (!allowEpubConversion) {
-      notifyStatus("Index needed", displayNameForPath(path).c_str(), "Open from library", 100);
+      notifyStatus("Index needed", bookStatusLabel(path).c_str(), "Open from library", 100);
       return false;
     }
 
@@ -2789,7 +2797,7 @@ bool StorageManager::loadIndexedBook(size_t index, IndexedBookStore &store,
     if (convertedIndex < 0) {
       Serial.printf("[storage] Converted RSVP not found in refreshed library: %s\n",
                     rsvpPath.c_str());
-      notifyStatus("Book open failed", displayNameForPath(path).c_str(),
+      notifyStatus("Book open failed", bookStatusLabel(path).c_str(),
                    "Conversion cache missing", 100);
       return false;
     }
@@ -2804,12 +2812,12 @@ bool StorageManager::loadIndexedBook(size_t index, IndexedBookStore &store,
       entry.close();
     }
     Serial.printf("[storage] Selected book is not readable: %s\n", path.c_str());
-    notifyStatus("Book open failed", displayNameForPath(path).c_str(), "File unreadable", 100);
+    notifyStatus("Book open failed", bookStatusLabel(path).c_str(), "File unreadable", 100);
     return false;
   }
   entry.close();
 
-  notifyStatus("Opening book", displayNameForPath(path).c_str(), "Checking index", 12);
+  notifyStatus("Opening book", bookStatusLabel(path).c_str(), "Checking index", 12);
   if (!ensureIndexedBook(path, metadata, hasRsvpExtension(path), allowIndexBuild)) {
     metadata.clear();
     return false;
@@ -2818,15 +2826,15 @@ bool StorageManager::loadIndexedBook(size_t index, IndexedBookStore &store,
   IndexedBookStore::Header header;
   if (!readIndexedMetadata(path, metadata, &header)) {
     metadata.clear();
-    notifyStatus("Book open failed", displayNameForPath(path).c_str(), "Index invalid", 100);
+    notifyStatus("Book open failed", bookStatusLabel(path).c_str(), "Index invalid", 100);
     return false;
   }
   BookExtras::applyChapters(path, metadata);
 
-  notifyStatus("Opening book", displayNameForPath(path).c_str(), "Opening word cache", 80);
+  notifyStatus("Opening book", bookStatusLabel(path).c_str(), "Opening word cache", 80);
   if (!store.open(indexedIndexPathFor(path), indexedDataPathFor(path), header)) {
     metadata.clear();
-    notifyStatus("Book open failed", displayNameForPath(path).c_str(), "Index unreadable", 100);
+    notifyStatus("Book open failed", bookStatusLabel(path).c_str(), "Index unreadable", 100);
     return false;
   }
 

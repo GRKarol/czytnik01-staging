@@ -1,4 +1,5 @@
 import { LitElement, css, html, nothing } from "lit";
+import { App as CapApp } from "@capacitor/app";
 import { customElement, state } from "lit/decorators.js";
 import { keyed } from "lit/directives/keyed.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
@@ -38,6 +39,7 @@ import { getTutorialStatus } from "./onboarding/onboarding-store";
 import { followReaderLang, getLang, onLangChange, tr } from "./i18n/index";
 import { deviceLangToSupported } from "./i18n/lang-map";
 import { icons } from "./ui/icons";
+import { runBackHandlers } from "./ui/back-nav";
 import { sharedStyles, themeTokens } from "./ui/theme";
 import { applyLook, lookFromSettings, saveLook, savedLook } from "./ui/reader-look";
 import { applyFont, fontFromSettings, saveFont, savedFont } from "./ui/reader-font";
@@ -65,6 +67,11 @@ export class CzytnikApp extends LitElement {
   // phone finding the reader's network.
   @state() private qrFallbackVisible = false;
   @state() private scanningQr = false;
+  // Back on Home asks before leaving the app.
+  @state() private exitAsk = false;
+  // Tabs visited before the current one, for the phone's Back button.
+  private viewHistory: View[] = [];
+  private backListener: { remove: () => Promise<void> } | null = null;
   private qrFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
 
@@ -94,6 +101,11 @@ export class CzytnikApp extends LitElement {
     // connect without asking.
     void this.autoConnect();
     document.addEventListener("visibilitychange", this.onVisibilityChange);
+    if (isNativeApp()) {
+      void CapApp.addListener("backButton", () => this.onPhoneBack()).then((listener) => {
+        this.backListener = listener;
+      });
+    }
   }
 
   disconnectedCallback(): void {
@@ -106,6 +118,36 @@ export class CzytnikApp extends LitElement {
     this.removeEventListener("restart-tutorial", this.handleRestartTutorial);
     this.removeEventListener("open-view", this.onOpenView as EventListener);
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
+    void this.backListener?.remove();
+    this.backListener = null;
+  }
+
+  /**
+   * The phone's Back button: the open sub-screen closes first, then the
+   * tabs step back to Home, and Home asks before leaving.
+   */
+  private onPhoneBack(): void {
+    if (this.exitAsk) {
+      this.exitAsk = false;
+      return;
+    }
+    if (this.scanningQr) {
+      this.scanningQr = false;
+      return;
+    }
+    if (this.showTutorial) {
+      this.showTutorial = false;
+      return;
+    }
+    if (runBackHandlers()) return;
+    if (this.view !== "home") {
+      let previous = this.viewHistory.pop() ?? "home";
+      // A tab that disappeared meanwhile (Plugins without advanced mode).
+      if (previous === "plugins" && !this.devMode) previous = "home";
+      this.switchView(previous, false);
+      return;
+    }
+    this.exitAsk = true;
   }
 
   private onVisibilityChange = () => {
@@ -279,6 +321,7 @@ export class CzytnikApp extends LitElement {
       getLang(),
       html`
         <onboarding-wizard></onboarding-wizard>
+        ${this.exitAsk ? this.renderExitAsk() : nothing}
         <pwa-install-dialog></pwa-install-dialog>
         ${this.showTutorial ? html`<tutorial-wizard></tutorial-wizard>` : nothing}
 
@@ -309,6 +352,20 @@ export class CzytnikApp extends LitElement {
     );
   }
 
+  private renderExitAsk() {
+    return html`
+      <div class="exit-ask" @click=${() => (this.exitAsk = false)}>
+        <div class="exit-card" @click=${(e: Event) => e.stopPropagation()}>
+          <p>${tr("app.exit.title")}</p>
+          <div class="exit-actions">
+            <button class="btn" @click=${() => (this.exitAsk = false)}>${tr("app.exit.no")}</button>
+            <button class="btn primary" @click=${() => void CapApp.exitApp()}>${tr("app.exit.yes")}</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   private navButton(v: View, label: string, ico: unknown) {
     return html`
       <button class=${this.view === v ? "on" : ""} @click=${() => this.switchView(v)}>
@@ -318,7 +375,17 @@ export class CzytnikApp extends LitElement {
     `;
   }
 
-  private switchView(v: View): void {
+  private switchView(v: View, remember = true): void {
+    if (v === this.view) {
+      if (v === "home" && this.onReader) void this.loadOverview();
+      return;
+    }
+    if (v === "home") {
+      this.viewHistory = [];
+    } else if (remember) {
+      this.viewHistory = this.viewHistory.filter((seen) => seen !== v);
+      this.viewHistory.push(this.view);
+    }
     this.view = v;
     if (v === "home" && this.onReader) void this.loadOverview();
   }
@@ -678,6 +745,35 @@ export class CzytnikApp extends LitElement {
         background: var(--bg);
         color: var(--text);
         font-family: var(--font);
+      }
+
+      .exit-ask {
+        position: fixed;
+        inset: 0;
+        z-index: 200;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: rgba(0, 0, 0, 0.45);
+      }
+      .exit-card {
+        width: 100%;
+        max-width: 320px;
+        padding: 20px;
+        border-radius: 14px;
+        background: var(--surface);
+        color: var(--text);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+      }
+      .exit-card p {
+        margin: 0 0 16px;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .exit-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
       }
 
       header {

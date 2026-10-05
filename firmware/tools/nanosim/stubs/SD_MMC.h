@@ -8,9 +8,11 @@ class File {
   void close() {}
   bool seek(size_t) { return false; }
   int available() { return 0; }
+  bool isDirectory() const { return false; }
 };
 struct SdMmcStub {
   bool exists(const String &) { return false; }
   File open(const String &, const char * = "r") { return File(); }
+  bool remove(const String &) { return false; }
 };
 extern SdMmcStub SD_MMC;

@@ -48,6 +48,9 @@ bool TouchHandler::begin() {
   consecutiveReadFailures_ = 0;
   emptyTouchSamples_ = 0;
   touchActive_ = false;
+  // Right after power-on the controller can report a press nobody made;
+  // held long enough it started the reading by itself (hold-to-read).
+  waitForRelease_ = true;
   lastX_ = 0;
   lastY_ = 0;
   Wire.beginTransmission(kAddress);
@@ -76,6 +79,11 @@ void TouchHandler::cancel() {
   lastTouchSampleMs_ = 0;
   consecutiveReadFailures_ = 0;
   emptyTouchSamples_ = 0;
+}
+
+void TouchHandler::ignoreUntilReleased() {
+  cancel();
+  waitForRelease_ = true;
 }
 
 void TouchHandler::setUiOrientation(BoardConfig::UiOrientation orientation) {
@@ -140,6 +148,12 @@ bool TouchHandler::poll(TouchEvent &event) {
   consecutiveReadFailures_ = 0;
 
   const uint8_t points = data[1];
+  if (waitForRelease_) {
+    if (points == 0 || points >= 5) {
+      waitForRelease_ = false;
+    }
+    return false;
+  }
   if (points == 0 || points >= 5) {
     if (touchActive_) {
       ++emptyTouchSamples_;

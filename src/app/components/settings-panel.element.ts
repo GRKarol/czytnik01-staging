@@ -17,6 +17,7 @@ import { APP_VERSION } from "../../shared/config";
 import { setSoftColors, softColors } from "../ui/reader-look";
 import { LANG_NAMES, SUPPORTED_LANGS, chooseLang, chosenLang, tr, type SupportedLang } from "../i18n/index";
 import { icons } from "../ui/icons";
+import { onBack } from "../ui/back-nav";
 import { rangeFill, rgb565, sharedStyles } from "../ui/theme";
 import "./help-panel.element";
 import "./updates-panel.element";
@@ -42,6 +43,7 @@ export class SettingsPanel extends LitElement {
   @state() private justUnlocked = false;
   private tapResetTimer: number | null = null;
   private unsubApi: (() => void) | null = null;
+  private unsubBack: (() => void) | null = null;
 
   @state() private wifi: WifiStationConfig | null = null;
   @state() private wifiSsidInput = "";
@@ -59,12 +61,18 @@ export class SettingsPanel extends LitElement {
     super.connectedCallback();
     void this.load();
     this.unsubApi = onDeviceApiChange(() => void this.load());
+    this.unsubBack = onBack(() => {
+      if (this.page === "root") return false;
+      this.go("root");
+      return true;
+    });
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     if (this.tapResetTimer) window.clearTimeout(this.tapResetTimer);
     this.unsubApi?.();
+    this.unsubBack?.();
   }
 
   private get onReader(): boolean {

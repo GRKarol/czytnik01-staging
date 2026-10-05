@@ -1105,18 +1105,121 @@ int scaledWordWidthPercent(const String &word, uint8_t scalePercent) {
   return textLayoutWidth(serifWordLayoutScaledPercent(word, -1, scalePercent));
 }
 
-ReaderTextStyle readerTextStyle(uint8_t fontSizeLevel) {
+// Glyph alpha at a point given in 1/256 px of the raster, interpolated from
+// the four nearest pixels (used to draw a raster larger than it was made).
+uint8_t glyphAlphaBilinear(const ReaderGlyph &glyph, int x256, int y256, bool invert) {
+  const int x0 = x256 >> 8;
+  const int y0 = y256 >> 8;
+  const int fx = x256 & 0xFF;
+  const int fy = y256 & 0xFF;
+  auto at = [&](int x, int y) -> int {
+    if (x < 0 || y < 0 || x >= glyph.width || y >= glyph.height) {
+      return 0;
+    }
+    const int lookupY = invert ? glyph.height - 1 - y : y;
+    const int lookupX = invert ? glyph.width - 1 - x : x;
+    return glyph.bitmap[lookupY * glyph.width + lookupX];
+  };
+  const int top = at(x0, y0) * (256 - fx) + at(x0 + 1, y0) * fx;
+  const int bottom = at(x0, y0 + 1) * (256 - fx) + at(x0 + 1, y0 + 1) * fx;
+  return static_cast<uint8_t>((top * (256 - fy) + bottom * fy) >> 16);
+}
+
+// Source coordinate (1/256 px) of the centre of destination pixel `dst`.
+int upscaleSource256(int dst, int sourceSize, int scaledSize) {
+  return ((2 * dst + 1) * sourceSize * 128) / scaledSize - 128;
+}
+
+// Reading sizes (Large, Medium, Small) as one letter height for every
+// typeface: the mean of the inked x and H heights, in px. The rasters differ
+// a lot (Standard and OpenDyslexic draw letters 26 px tall where Atkinson and
+// the card fonts draw 41), so each face gets its own scale for each size.
+constexpr int kReaderTargetOpticalTenthsPx[] = {340, 255, 200};
+// A medium raster this close to the Medium target is drawn as is (sharper
+// than a scaled base raster).
+constexpr int kMediumRasterToleranceTenthsPx = 20;
+
+int inkedRows(const ReaderGlyph &glyph) {
+  if (glyph.bitmap == nullptr || glyph.width == 0) {
+    return 0;
+  }
+  int top = -1;
+  int bottom = -1;
+  for (int row = 0; row < glyph.height; ++row) {
+    for (int col = 0; col < glyph.width; ++col) {
+      if (glyph.bitmap[row * glyph.width + col] >= 128) {
+        if (top < 0) {
+          top = row;
+        }
+        bottom = row;
+        break;
+      }
+    }
+  }
+  return top < 0 ? 0 : bottom - top + 1;
+}
+
+// How big a face reads, in tenths of a px: the mean of the inked x and H
+// heights, weighted by the square root of how wide its lowercase runs next
+// to the usual book face (Standard and OpenDyslexic are about 27% wider for
+// the same height and looked bigger at it). Cached per raster.
+int opticalTenthsFor(DisplayManager::ReaderTypeface typeface, bool medium) {
+  struct Entry {
+    const uint8_t *bitmap = nullptr;
+    int tenths = 0;
+  };
+  static Entry cache[2][static_cast<size_t>(DisplayManager::ReaderTypeface::Count)];
+  const size_t index = static_cast<size_t>(typeface);
+  if (index >= static_cast<size_t>(DisplayManager::ReaderTypeface::Count)) {
+    return 0;
+  }
+  const ReaderGlyph x = medium ? glyph70For('x', typeface) : glyphFor('x', typeface);
+  Entry &entry = cache[medium ? 1 : 0][index];
+  if (entry.bitmap != x.bitmap || entry.tenths == 0) {
+    const ReaderGlyph h = medium ? glyph70For('H', typeface) : glyphFor('H', typeface);
+    const int heightTenths = (inkedRows(x) + inkedRows(h)) * 5;
+    static const char kWidthSample[] = "aemnorsu";
+    int advanceSum = 0;
+    for (const char *c = kWidthSample; *c != '\0'; ++c) {
+      advanceSum += (medium ? glyph70For(*c, typeface) : glyphFor(*c, typeface)).xAdvance;
+    }
+    // Lowercase advance per px of letter height in the book faces.
+    constexpr float kTypicalWidthRatio = 0.96f;
+    const float widthRatio = heightTenths > 0
+                                 ? (advanceSum * 10.0f / (sizeof(kWidthSample) - 1)) / heightTenths
+                                 : kTypicalWidthRatio;
+    entry.bitmap = x.bitmap;
+    entry.tenths = static_cast<int>(heightTenths * sqrtf(widthRatio / kTypicalWidthRatio) + 0.5f);
+  }
+  return entry.tenths;
+}
+
+uint8_t clampReaderLevel(uint8_t fontSizeLevel) { return fontSizeLevel <= 2 ? fontSizeLevel : 0; }
+
+// Medium uses the face's own medium raster when it already has the target
+// letter size; otherwise the base raster is scaled like Large and Small.
+bool readerUsesMediumRaster(uint8_t fontSizeLevel, DisplayManager::ReaderTypeface typeface) {
+  if (clampReaderLevel(fontSizeLevel) != 1) {
+    return false;
+  }
+  const int tenths = opticalTenthsFor(typeface, true);
+  return tenths > 0 && std::abs(tenths - kReaderTargetOpticalTenthsPx[1]) <= kMediumRasterToleranceTenthsPx;
+}
+
+ReaderTextStyle readerTextStyle(uint8_t fontSizeLevel, DisplayManager::ReaderTypeface typeface) {
   static constexpr ReaderTextStyle kStyles[] = {
       {100, kPhantomCurrentGapLarge, kPhantomAlphaLarge},
       {70, kPhantomCurrentGapMedium, kPhantomAlphaMedium},
       {50, kPhantomCurrentGapSmall, kPhantomAlphaSmall},
   };
-
-  const size_t styleCount = sizeof(kStyles) / sizeof(kStyles[0]);
-  if (fontSizeLevel >= styleCount) {
-    fontSizeLevel = 0;
+  fontSizeLevel = clampReaderLevel(fontSizeLevel);
+  ReaderTextStyle style = kStyles[fontSizeLevel];
+  const int baseTenths = opticalTenthsFor(typeface, false);
+  if (baseTenths > 0) {
+    const int percent = (kReaderTargetOpticalTenthsPx[fontSizeLevel] * 100 + baseTenths / 2) / baseTenths;
+    style.scalePercent = static_cast<uint8_t>(std::max(20, std::min(200, percent)));
   }
-  return kStyles[fontSizeLevel];
+  return style;
 }
 
 int orpOrdinalForLength(int length) {
@@ -1470,7 +1573,15 @@ uint8_t DisplayManager::scrollScalePercent() const {
   // Level 0: ~19px, Level 4: ~31px (default), Level 8: ~59px
   static const uint8_t kScalePercents[] = {30, 35, 40, 45, 50, 56, 64, 76, 95};
   const uint8_t fs = scrollFontSize_ <= 8 ? scrollFontSize_ : 4;
-  return kScalePercents[fs];
+  // The steps are tuned on Atkinson's letters (41.5 px); faces drawn smaller
+  // or larger are scaled to the same letter height.
+  constexpr int kReferenceOpticalTenthsPx = 415;
+  const int tenths = opticalTenthsFor(currentReaderTypeface(), false);
+  if (tenths <= 0) {
+    return kScalePercents[fs];
+  }
+  const int percent = (kScalePercents[fs] * kReferenceOpticalTenthsPx + tenths / 2) / tenths;
+  return static_cast<uint8_t>(std::max(20, std::min(200, percent)));
 }
 
 bool DisplayManager::darkMode() const { return darkMode_; }
@@ -1903,7 +2014,7 @@ void DisplayManager::drawSerifGlyphScaledPercent(int x, int y, char c, uint16_t 
 void DisplayManager::drawSerifGlyphScaledPercent(int x, int y, char c, uint16_t color,
                                                  uint8_t scalePercent,
                                                  ReaderTypeface typeface) {
-  if (scalePercent >= 100) {
+  if (scalePercent == 100) {
     drawGlyph(x, y, c, color, typeface);
     return;
   }
@@ -1917,6 +2028,29 @@ void DisplayManager::drawSerifGlyphScaledPercent(int x, int y, char c, uint16_t 
   const int glyphHeight = glyph.height;
   const int scaledWidth = scaledPercentDimension(glyph.width, scalePercent);
   const int scaledHeight = scaledPercentDimension(glyphHeight, scalePercent);
+
+  if (scalePercent > 100) {
+    for (int dstRow = 0; dstRow < scaledHeight; ++dstRow) {
+      const int dstY = y + dstRow;
+      if (dstY < 0 || dstY >= kVirtualBufferHeight) {
+        continue;
+      }
+      const int sourceY = upscaleSource256(dstRow, glyphHeight, scaledHeight);
+      for (int dstCol = 0; dstCol < scaledWidth; ++dstCol) {
+        const int dstX = x + dstCol;
+        if (dstX < 0 || dstX >= kVirtualBufferWidth) {
+          continue;
+        }
+        const uint8_t alpha =
+            glyphAlphaBilinear(glyph, upscaleSource256(dstCol, glyph.width, scaledWidth), sourceY, invert);
+        if (alpha < kGlyphAlphaThreshold) {
+          continue;
+        }
+        virtualFrame_[dstY * kVirtualBufferWidth + dstX] = panelColor(blendOverBackground(color, alpha));
+      }
+    }
+    return;
+  }
 
   for (int dstRow = 0; dstRow < scaledHeight; ++dstRow) {
     const int dstY = y + dstRow;
@@ -2869,7 +3003,7 @@ void DisplayManager::renderPhantomRsvpWord(const String &beforeText, const Strin
 
   lastRenderKey_ = renderKey;
 
-  if (fontSizeLevel == 1) {
+  if (readerUsesMediumRaster(fontSizeLevel, effectiveReaderTypefaceForText(word))) {
     const int scale = 1;
     const int virtualWidth = kDisplayWidth;
     const int virtualHeight = kDisplayHeight;
@@ -2914,7 +3048,7 @@ void DisplayManager::renderPhantomRsvpWord(const String &beforeText, const Strin
     return;
   }
 
-  const ReaderTextStyle style = readerTextStyle(fontSizeLevel);
+  const ReaderTextStyle style = readerTextStyle(fontSizeLevel, effectiveReaderTypefaceForText(word));
   const int scale = 1;
   const int virtualWidth = kDisplayWidth;
   const int virtualHeight = kDisplayHeight;
@@ -3013,7 +3147,7 @@ void DisplayManager::renderWordTickerView(const std::vector<ContextWord> &words,
       std::max(0, virtualHeight - kTinyGlyphHeight * kTinyScale - kWpmFeedbackBottomMargin - 24);
   const uint16_t textColor = wordColor();
 
-  if (fontSizeLevel == 1) {
+  if (readerUsesMediumRaster(fontSizeLevel, effectiveReaderTypefaceForText(words[currentWordIndex].text))) {
     auto layoutFor = [&](size_t index) { return serif70WordLayout(words[index].text, -1); };
     auto widthFor = [&](const TextLayoutMetrics &layout) { return textLayoutWidth(layout); };
 
@@ -3089,7 +3223,7 @@ void DisplayManager::renderWordTickerView(const std::vector<ContextWord> &words,
     return;
   }
 
-  const ReaderTextStyle style = readerTextStyle(fontSizeLevel);
+  const ReaderTextStyle style = readerTextStyle(fontSizeLevel, effectiveReaderTypefaceForText(words[currentWordIndex].text));
   auto layoutFor = [&](size_t index) {
     return serifWordLayoutScaledPercent(words[index].text, -1, style.scalePercent);
   };
@@ -3217,7 +3351,7 @@ void DisplayManager::renderTypographyPreview(const String &beforeText, const Str
   drawTinyTextCentered(fitTinyText(title, maxLabelWidth, kTinyScale), titleY, wordColor(),
                        kTinyScale);
 
-  if (fontSizeLevel == 1) {
+  if (readerUsesMediumRaster(fontSizeLevel, effectiveReaderTypefaceForText(word))) {
     const int textHeight = mediumGlyphHeightForTypeface(effectiveReaderTypefaceForText(word));
     int textY = (textTop + textBottom - textHeight) / 2;
     textY = std::max(textTop, std::min(textY, textBottom - textHeight));
@@ -3242,7 +3376,7 @@ void DisplayManager::renderTypographyPreview(const String &beforeText, const Str
       drawSerif70TextAt(afterText, afterX, textY, phantomColor);
     }
   } else {
-    const ReaderTextStyle style = readerTextStyle(fontSizeLevel);
+    const ReaderTextStyle style = readerTextStyle(fontSizeLevel, effectiveReaderTypefaceForText(word));
     const int textHeight = scaledPercentDimension(
         baseGlyphHeightForTypeface(effectiveReaderTypefaceForText(word)), style.scalePercent);
     int textY = (textTop + textBottom - textHeight) / 2;
@@ -3302,7 +3436,7 @@ void DisplayManager::renderPhantomRsvpWordWithWpm(const String &beforeText, cons
 
   lastRenderKey_ = renderKey;
 
-  if (fontSizeLevel == 1) {
+  if (readerUsesMediumRaster(fontSizeLevel, effectiveReaderTypefaceForText(word))) {
     const int scale = 1;
     const int virtualWidth = kDisplayWidth;
     const int virtualHeight = kDisplayHeight;
@@ -3350,7 +3484,7 @@ void DisplayManager::renderPhantomRsvpWordWithWpm(const String &beforeText, cons
     return;
   }
 
-  const ReaderTextStyle style = readerTextStyle(fontSizeLevel);
+  const ReaderTextStyle style = readerTextStyle(fontSizeLevel, effectiveReaderTypefaceForText(word));
   const int scale = 1;
   const int virtualWidth = kDisplayWidth;
   const int virtualHeight = kDisplayHeight;

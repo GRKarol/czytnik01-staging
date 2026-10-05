@@ -11,6 +11,7 @@ import { deviceApi, onDeviceApiChange } from "../device/api";
 import { HttpDeviceApi } from "../device/http-api";
 import { extractEpubCover } from "../converter/epub";
 import { formatNumber, onLangChange, tr } from "../i18n/index";
+import { onBack } from "../ui/back-nav";
 import "./first-use-hint.element";
 import "./cover-editor.element";
 import "./chapter-editor.element";
@@ -39,6 +40,7 @@ export class ConverterPanel extends LitElement {
 
   private unsubApi: (() => void) | null = null;
   private unsubLang: (() => void) | null = null;
+  private unsubBack: (() => void) | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -46,12 +48,18 @@ export class ConverterPanel extends LitElement {
       this.deviceConnected = deviceApi.current instanceof HttpDeviceApi;
     });
     this.unsubLang = onLangChange(() => this.requestUpdate());
+    this.unsubBack = onBack(() => {
+      if (!this.editor) return false;
+      this.editor = null;
+      return true;
+    });
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.unsubApi?.();
     this.unsubLang?.();
+    this.unsubBack?.();
   }
 
   render() {

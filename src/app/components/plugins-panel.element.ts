@@ -7,6 +7,7 @@ import { HttpDeviceApi } from "../device/http-api";
 import { isNativeApp } from "../device/network-pin";
 import { onLangChange, tr } from "../i18n/index";
 import { icons } from "../ui/icons";
+import { onBack } from "../ui/back-nav";
 import { sharedStyles } from "../ui/theme";
 
 /**
@@ -41,11 +42,21 @@ export class PluginsPanel extends LitElement {
 
   private unsubApi: (() => void) | null = null;
   private unsubLang: (() => void) | null = null;
+  private unsubBack: (() => void) | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.unsubApi = onDeviceApiChange(() => void this.load());
     this.unsubLang = onLangChange(() => this.requestUpdate());
+    this.unsubBack = onBack(() => {
+      if (this.confirmDelete) {
+        this.confirmDelete = "";
+        return true;
+      }
+      if (this.openId === null) return false;
+      this.closePlugin();
+      return true;
+    });
     void this.load();
   }
 
@@ -53,6 +64,7 @@ export class PluginsPanel extends LitElement {
     super.disconnectedCallback();
     this.unsubApi?.();
     this.unsubLang?.();
+    this.unsubBack?.();
     this.stopPlaying();
   }
 

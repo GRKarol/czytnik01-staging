@@ -5,6 +5,7 @@ import { HttpDeviceApi } from "../device/http-api";
 import { extractEpubCover } from "../converter/epub";
 import { decodePicture, readerCoverColor, readerInitials } from "../books/pictures";
 import { onLangChange, tr } from "../i18n/index";
+import { onBack } from "../ui/back-nav";
 import "./first-use-hint.element";
 import "./cover-editor.element";
 import "./chapter-editor.element";
@@ -45,18 +46,31 @@ export class LibraryPanel extends LitElement {
   @state() private covers = new Map<string, string>();
   private unsubApi: (() => void) | null = null;
   private unsubLang: (() => void) | null = null;
+  private unsubBack: (() => void) | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
     void this.refresh();
     this.unsubApi = onDeviceApiChange(() => void this.refresh());
     this.unsubLang = onLangChange(() => this.requestUpdate());
+    this.unsubBack = onBack(() => {
+      if (this.coverFor) {
+        this.coverFor = null;
+        return true;
+      }
+      if (this.chaptersFor) {
+        this.chaptersFor = null;
+        return true;
+      }
+      return false;
+    });
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.unsubApi?.();
     this.unsubLang?.();
+    this.unsubBack?.();
   }
 
   private get onReader(): boolean {

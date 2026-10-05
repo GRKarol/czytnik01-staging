@@ -224,4 +224,14 @@ export const MISC_STRINGS: Record<string, Entry> = {
     fr: "Pas d'accès à l'appareil photo. Autorisez-le pour Flower dans les réglages.",
     ro: "Fără acces la cameră. Permite camera pentru Flower în setările telefonului.",
   },
+  "app.exit.title": {
+    pl: "Opuścić aplikację?",
+    en: "Leave the app?",
+    de: "App verlassen?",
+    es: "¿Salir de la aplicación?",
+    fr: "Quitter l'application ?",
+    ro: "Ieși din aplicație?",
+  },
+  "app.exit.yes": { pl: "Tak", en: "Yes", de: "Ja", es: "Sí", fr: "Oui", ro: "Da" },
+  "app.exit.no": { pl: "Nie", en: "No", de: "Nein", es: "No", fr: "Non", ro: "Nu" },
 };

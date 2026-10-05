@@ -1,13 +1,17 @@
 import { LitElement, css, html, svg, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import { LANG_NAMES, SUPPORTED_LANGS, chooseLang, chosenLang, tr, type SupportedLang } from "../i18n/index";
+import { LANG_NAMES, SUPPORTED_LANGS, chooseLang, chosenLang, setLang, tr, type SupportedLang } from "../i18n/index";
 import type { PwaInstallDialog } from "./pwa-install-dialog.element";
 import { dandelionIcon } from "./flower-icon";
 
 const STORAGE_KEY = "flower.onboarded.v1";
 // Set once the language question on the first launch has an answer.
 const LANG_ASKED_KEY = "flower.langAsked.v1";
+
+// The tapped language, before Dalej confirms it. Module-level: the preview
+// switch rebuilds the whole app, this element included.
+let pendingLang: SupportedLang | null = null;
 
 function langAsked(): boolean {
   try {
@@ -93,25 +97,41 @@ export class OnboardingWizard extends LitElement {
             <p>${tr("onb.lang.text")}</p>
             <div class="langs">
               ${SUPPORTED_LANGS.map(
-                (lang) => html`<button class="lang" @click=${() => this.pickLang(lang)}>${LANG_NAMES[lang]}</button>`,
+                (lang) =>
+                  html`<button class=${lang === pendingLang ? "lang on" : "lang"} @click=${() => this.previewLang(lang)}>
+                    ${LANG_NAMES[lang]}
+                  </button>`,
               )}
             </div>
+          </div>
+          <div class="footer end">
+            <button class="cta" ?disabled=${pendingLang === null} @click=${this.confirmLang}>${tr("common.next")}</button>
           </div>
         </div>
       </div>
     `;
   }
 
-  private pickLang(lang: SupportedLang) {
+  /** A tap shows the app in that language; Dalej keeps it. */
+  private previewLang(lang: SupportedLang) {
+    pendingLang = lang;
+    this.requestUpdate();
+    // Not remembered yet; rebuilds the app (this element too) in it.
+    setLang(lang);
+  }
+
+  private confirmLang = () => {
+    const lang = pendingLang;
+    if (lang === null) return;
     try {
       localStorage.setItem(LANG_ASKED_KEY, lang);
     } catch {
       /* asked again next launch */
     }
+    pendingLang = null;
     this.askLang = false;
-    // Re-renders the whole app in the new language.
     chooseLang(lang);
-  }
+  };
 
   private renderStep(): TemplateResult {
     switch (this.step) {
@@ -341,9 +361,17 @@ export class OnboardingWizard extends LitElement {
       font-weight: 600;
       cursor: pointer;
     }
-    .lang:active {
+    .lang:active,
+    .lang.on {
       background: #1488d8;
       color: #fff;
+    }
+    .footer.end {
+      justify-content: flex-end;
+    }
+    .cta:disabled {
+      opacity: 0.4;
+      cursor: default;
     }
     .cta {
       padding: 12px 22px;

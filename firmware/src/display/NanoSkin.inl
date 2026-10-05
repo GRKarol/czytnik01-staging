@@ -825,7 +825,7 @@ void DisplayManager::nanoTypefaceGlyph(int x, int y, char c, uint16_t color, uin
   }
   const bool invert = shouldDrawInvertedGlyph(c);
   const int glyphHeight = glyph.height;
-  if (scalePercent >= 100) {
+  if (scalePercent == 100) {
     for (int row = 0; row < glyphHeight; ++row) {
       for (int col = 0; col < glyph.width; ++col) {
         const int sourceRow = invert ? glyphHeight - 1 - row : row;
@@ -837,6 +837,16 @@ void DisplayManager::nanoTypefaceGlyph(int x, int y, char c, uint16_t color, uin
   }
   const int scaledWidth = scaledPercentDimension(glyph.width, scalePercent);
   const int scaledHeight = scaledPercentDimension(glyphHeight, scalePercent);
+  if (scalePercent > 100) {
+    for (int dstRow = 0; dstRow < scaledHeight; ++dstRow) {
+      const int sourceY = upscaleSource256(dstRow, glyphHeight, scaledHeight);
+      for (int dstCol = 0; dstCol < scaledWidth; ++dstCol) {
+        nanoBlendPixel(x + dstCol, y + dstRow, color,
+                       glyphAlphaBilinear(glyph, upscaleSource256(dstCol, glyph.width, scaledWidth), sourceY, invert));
+      }
+    }
+    return;
+  }
   for (int dstRow = 0; dstRow < scaledHeight; ++dstRow) {
     const int sourceYStart = (dstRow * glyphHeight) / scaledHeight;
     const int sourceYEnd = std::min(glyphHeight, ((dstRow + 1) * glyphHeight + scaledHeight - 1) / scaledHeight);
@@ -964,7 +974,7 @@ void DisplayManager::nanoReaderSample(const ui::Rect &area, const String &before
   }
   const ReaderTypeface face = currentReaderTypeface();
   const int baseHeight = std::max(1, baseGlyphHeightForTypeface(face));
-  const ReaderTextStyle style = readerTextStyle(fontSizeLevel);
+  const ReaderTextStyle style = readerTextStyle(fontSizeLevel, face);
   // Room for the guide lines above and below the word.
   const int fit = (areaH - kRsvpGuideTopOffset - kRsvpGuideBottomOffset - 4) * 100 / baseHeight;
   const uint8_t scalePercent = static_cast<uint8_t>(std::max(20, std::min<int>(style.scalePercent, fit)));

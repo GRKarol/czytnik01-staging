@@ -41,6 +41,10 @@ constexpr uint32_t kWizardRestartDelayMs = 2000;
 // A check that hangs (GitHub unreachable, no DNS) stops holding the
 // loading screen after this long; a running download is left alone.
 constexpr uint32_t kWizardUpdateCheckMaxMs = 90000;
+// The loading step starts the font task again while the pack is incomplete
+// and the network answers, up to this many runs (each one tries every
+// missing file three times over).
+constexpr uint8_t kWizardFontRounds = 3;
 // A Dalej/Wstecz/extra tap this soon after the page changed is ignored.
 constexpr uint32_t kWizardTapGuardMs = 450;
 
@@ -908,6 +912,7 @@ void App::startWelcomeAssetDownloads() {
   g_bookDlDone = 0;
   g_bookDlTotal = 0;
   welcomeFontsStarted_ = false;
+  welcomeFontRounds_ = 0;
   welcomeAssetsProgressMark_ = 0;
   welcomeAssetsProgressMs_ = millis();
   if (!storageReady_) {
@@ -926,6 +931,7 @@ void App::startWelcomeAssetDownloads() {
 
 void App::startWelcomeFontDownload() {
   welcomeFontsStarted_ = true;
+  ++welcomeFontRounds_;
   if (refreshFontPackComplete() || fontDownloadInProgress_) {
     return;
   }
@@ -977,10 +983,20 @@ void App::updateWelcomeLoading(uint32_t nowMs) {
       if (!welcomeFontsStarted_ && !bookDownloadInProgress_) {
         startWelcomeFontDownload();
       }
+      // A run that ended with fonts still missing (a file failed three
+      // times, the connection dropped) is followed by another one here: the
+      // whole pack has to be on the card before the font step.
+      if (welcomeFontsStarted_ && !fontDownloadInProgress_ && !bookDownloadInProgress_ &&
+          welcomeFontRounds_ < kWizardFontRounds && !refreshFontPackComplete()) {
+        Serial.printf("[welcome] font pack incomplete after run %u, starting another\n",
+                      static_cast<unsigned>(welcomeFontRounds_));
+        startWelcomeFontDownload();
+      }
       // Waits for every file; only a download that stops moving for
       // kWelcomeAssetsStallMs (no network, GitHub down) lets the wizard go
       // on without the rest. Fonts left out keep retrying in the background.
-      const unsigned progressMark = g_fontDlDone.load() + g_bookDlDone.load() + (welcomeFontsStarted_ ? 1U : 0U);
+      const unsigned progressMark = g_fontDlDone.load() + g_bookDlDone.load() + g_assetDlTicks.load() +
+                                    welcomeFontRounds_ + (welcomeFontsStarted_ ? 1U : 0U);
       if (progressMark != welcomeAssetsProgressMark_) {
         welcomeAssetsProgressMark_ = progressMark;
         welcomeAssetsProgressMs_ = nowMs;

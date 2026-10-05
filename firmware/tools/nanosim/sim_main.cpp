@@ -35,6 +35,7 @@ void runWizardScreens(DisplayManager &d, void (*dumpFn)(const DisplayManager &, 
 void runWizard2Screens(DisplayManager &d, void (*dumpFn)(const DisplayManager &, const char *));
 void runWizard3Screens(DisplayManager &d, void (*dumpFn)(const DisplayManager &, const char *));
 void runExtrasScreens(DisplayManager &d, void (*dumpFn)(const DisplayManager &, const char *));
+void runFontSizeScreens(DisplayManager &d, void (*dumpFn)(const DisplayManager &, const char *));
 
 int main() {
   DisplayManager d;
@@ -54,5 +55,6 @@ int main() {
   runWizard3Screens(d, dump);
   d.setNanoUiFont(0);
   runExtrasScreens(d, dump);
+  runFontSizeScreens(d, dump);
   return 0;
 }
