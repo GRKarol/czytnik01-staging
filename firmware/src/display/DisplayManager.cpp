@@ -1532,7 +1532,7 @@ DisplayManager::TypographyConfig DisplayManager::typographyConfig() const {
 }
 
 void DisplayManager::setScrollFontSize(uint8_t level) {
-  scrollFontSize_ = level <= 8 ? level : 4;
+  scrollFontSize_ = level <= 8 ? level : 1;
 }
 
 void DisplayManager::setScrollLineSpacing(uint8_t level) {

@@ -819,19 +819,20 @@ void paintReaderPanel(DisplayManager &d, Sink &sink, const ReaderPanelView &view
                         view.currentLocal);
   } else {
     d.nanoReaderPreview(Rect(0, words.y + 2, kScreenW, words.h - (view.hint.isEmpty() ? 4 : 18)), view.before,
-                        view.word, view.after);
+                        view.word, view.after, view.fontSizeLevel);
   }
   if (!view.hint.isEmpty()) {
     d.nanoLabel(Rect(12, bottom(words) - 16, kScreenW - 24, 16), view.hint, 1, Role::Subtle, Align::Center);
   }
   d.nanoProgress(Rect(12, 122, kScreenW - 24, 3), view.progressPercent, 0, 100);
 
-  // Bottom bar: Menu | chapters | go to | bookmark | << | colors | - WPM + | Czytaj.
+  // Bottom bar: Menu | go to | bookmark | << | colors | - WPM + | Czytaj.
+  // Chapters live under "go to", so they have no button of their own.
   const int y = 132;
   const int h = kScreenH - y - 4;
-  constexpr int kSmall = 44;
+  constexpr int kSmall = 48;
   int x = 10;
-  const Rect menu(x, y, 72, h);
+  const Rect menu(x, y, 84, h);
   d.nanoButton(menu, view.menuLabel, true, Icon::None, 1, "", "", sink.pressed(view.menuId));
   addTarget(sink, menu, view.menuId);
   x += menu.w + kGap;
@@ -844,7 +845,6 @@ void paintReaderPanel(DisplayManager &d, Sink &sink, const ReaderPanelView &view
     addTarget(sink, rect, id);
     x += kSmall + kGap;
   };
-  small(view.chaptersId, Icon::List);
   small(view.gotoId, Icon::Target);
   const Rect bookmark(x, y, kSmall, h);
   const uint16_t bookmarkSurface = d.nanoColor(sink.pressed(view.bookmarkId) ? Role::SurfaceActive : Role::SurfaceMuted);
@@ -863,7 +863,7 @@ void paintReaderPanel(DisplayManager &d, Sink &sink, const ReaderPanelView &view
   small(view.lookId, Icon::Palette);
 
   // WPM stepper: one pill with - and + ends.
-  const int stepperW = 164;
+  const int stepperW = 172;
   const Rect stepper(x, y, stepperW, h);
   d.nanoFillRoundRect(stepper.x, stepper.y, stepper.w, stepper.h, 8, d.nanoColor(Role::SurfaceMuted));
   const Rect minus(stepper.x, y, 42, h);

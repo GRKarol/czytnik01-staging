@@ -91,6 +91,14 @@ void App::renderTutorialStep() {
 }
 
 void App::handleTutorialTouchAt(uint16_t x, uint16_t y, uint32_t nowMs) {
+  // An off-center tap on the panel's edge can arrive as two or three taps in
+  // a row; each one used to turn a page. One turn per 400 ms.
+  constexpr uint32_t kTutorialTurnGuardMs = 400;
+  // Counted from when the new page finished drawing; a tap queued while it
+  // drew is older than that, hence the signed difference.
+  if (tutorialTurnMs_ != 0 && static_cast<int32_t>(nowMs - tutorialTurnMs_) < static_cast<int32_t>(kTutorialTurnGuardMs)) {
+    return;
+  }
   int hit = nano::kNoTarget;
   for (const auto &target : tutorialTargets_) {
     const ui::Rect &r = target.first;
@@ -126,6 +134,7 @@ void App::handleTutorialTap(uint32_t nowMs) {
   }
   ++tutorialPage_;
   renderTutorialStep();
+  tutorialTurnMs_ = millis();
 }
 
 void App::previousTutorialStep(uint32_t nowMs) {
@@ -134,4 +143,5 @@ void App::previousTutorialStep(uint32_t nowMs) {
     --tutorialPage_;
   }
   renderTutorialStep();
+  tutorialTurnMs_ = millis();
 }

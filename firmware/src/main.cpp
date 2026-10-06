@@ -1,8 +1,16 @@
 #include <Arduino.h>
+#include <algorithm>
 #include <esp_log.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
 #include <driver/gpio.h>
+#include <esp_attr.h>
+#include <Preferences.h>
+#include <SD_MMC.h>
+#include <cerrno>
+#if ARDUINO_USB_MODE == 0
+#include "tusb.h"
+#endif
 
 #include "app/App.h"
 #include "board/BoardConfig.h"
@@ -40,6 +48,179 @@ void logResetReason() {
   Serial.flush();
 }
 
+// Double-boot hunt ("the noise shows twice at power-on"). RTC memory keeps
+// these through every reset except a real power loss, so a second boot
+// right after the first shows up as boot #2 with the reason of the reset.
+constexpr uint32_t kBootTraceMagic = 0x464C5752;  // "FLWR"
+RTC_NOINIT_ATTR uint32_t gBootTraceMagic;
+RTC_NOINIT_ATTR uint32_t gBootsSincePowerOn;
+RTC_NOINIT_ATTR uint32_t gLastUptimeMs;
+
+// The last 8 boots also go to NVS, read back over the cable later ("boot"
+// on the console) even when no port was open while they happened.
+struct BootTraceEntry {
+  uint8_t reason;
+  uint8_t bootNumber;
+  uint16_t flags;  // bit 0: PWR held at boot
+  uint32_t previousUptimeMs;
+};
+constexpr size_t kBootTraceEntries = 8;
+
+void printBootHistory() {
+  BootTraceEntry ring[kBootTraceEntries] = {};
+  Preferences prefs;
+  if (!prefs.begin("boottrace", true)) {
+    Serial.println("[boot] no history yet");
+    return;
+  }
+  prefs.getBytes("ring", ring, sizeof(ring));
+  prefs.end();
+  for (size_t i = 0; i < kBootTraceEntries; ++i) {
+    if (ring[i].bootNumber == 0) {
+      break;
+    }
+    Serial.printf("[boot] history %u: boot #%u since power-on, reason %u, PWR %s, previous run %lu ms\n",
+                  static_cast<unsigned>(i), ring[i].bootNumber, ring[i].reason,
+                  (ring[i].flags & 1U) != 0 ? "held" : "not held",
+                  static_cast<unsigned long>(ring[i].previousUptimeMs));
+  }
+}
+
+void traceBoot(bool pwrButtonHeld) {
+  const esp_reset_reason_t reason = esp_reset_reason();
+  const uint32_t previousUptimeMs = gBootTraceMagic == kBootTraceMagic ? gLastUptimeMs : 0;
+  if (reason == ESP_RST_POWERON || gBootTraceMagic != kBootTraceMagic) {
+    gBootsSincePowerOn = 0;
+  }
+  gBootTraceMagic = kBootTraceMagic;
+  ++gBootsSincePowerOn;
+  gLastUptimeMs = 0;
+  Serial.printf("[boot] #%lu since power-on, reset reason %d, previous run lasted %lu ms\n",
+                static_cast<unsigned long>(gBootsSincePowerOn), static_cast<int>(reason),
+                static_cast<unsigned long>(previousUptimeMs));
+
+  BootTraceEntry ring[kBootTraceEntries] = {};
+  Preferences prefs;
+  if (!prefs.begin("boottrace", false)) {
+    return;
+  }
+  prefs.getBytes("ring", ring, sizeof(ring));
+  for (size_t i = kBootTraceEntries - 1; i > 0; --i) {
+    ring[i] = ring[i - 1];
+  }
+  ring[0] = {static_cast<uint8_t>(reason), static_cast<uint8_t>(std::min<uint32_t>(gBootsSincePowerOn, 255)),
+             static_cast<uint16_t>(pwrButtonHeld ? 1U : 0U), previousUptimeMs};
+  prefs.putBytes("ring", ring, sizeof(ring));
+  prefs.end();
+  printBootHistory();
+}
+
+// USBCDC's operator bool only turns true once the host raises DTR and RTS
+// together; a terminal or esptool that opens the port with DTR alone (RTS
+// low keeps the chip out of its reset sequence) never got past it, and the
+// reader went back to sleep after every flash. DTR alone means a PC has the
+// port open.
+bool usbHostHasPortOpen() {
+#if ARDUINO_USB_MODE == 0
+  return Serial || tud_cdc_n_connected(0);
+#else
+  return static_cast<bool>(Serial);
+#endif
+}
+
+// Cable console for card trouble ("SD write failed" with free space left):
+// one command per line on the USB serial port.
+//   df          card size and use
+//   ls <dir>    files with sizes
+//   wt <KB>     write a test file in 4 KB chunks, read it back, delete it
+//   boot        the last 8 boots (traceBoot)
+void listCardDir(const String &path) {
+  File dir = SD_MMC.open(path);
+  if (!dir || !dir.isDirectory()) {
+    Serial.printf("[con] %s: not a directory\n", path.c_str());
+    return;
+  }
+  uint32_t count = 0;
+  for (File entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
+    Serial.printf("[con] %s%s %lu\n", entry.name(), entry.isDirectory() ? "/" : "",
+                  static_cast<unsigned long>(entry.size()));
+    ++count;
+    entry.close();
+  }
+  dir.close();
+  Serial.printf("[con] %lu entries in %s\n", static_cast<unsigned long>(count), path.c_str());
+}
+
+void writeTestCard(uint32_t kilobytes) {
+  static constexpr const char *kPath = "/_wtest.bin";
+  constexpr size_t kChunk = 4096;
+  auto *buffer = static_cast<uint8_t *>(malloc(kChunk));
+  if (buffer == nullptr) {
+    Serial.println("[con] wt: no memory");
+    return;
+  }
+  for (size_t i = 0; i < kChunk; ++i) buffer[i] = static_cast<uint8_t>(i * 7);
+  errno = 0;
+  File out = SD_MMC.open(kPath, FILE_WRITE);
+  if (!out) {
+    Serial.printf("[con] wt: open failed errno=%d\n", errno);
+    free(buffer);
+    return;
+  }
+  const uint32_t startedMs = millis();
+  uint32_t written = 0;
+  uint32_t shortWrites = 0;
+  for (uint32_t done = 0; done < kilobytes * 1024U; done += kChunk) {
+    errno = 0;
+    const size_t n = out.write(buffer, kChunk);
+    written += n;
+    if (n != kChunk) {
+      ++shortWrites;
+      Serial.printf("[con] wt: short write %u/%u at %lu B errno=%d\n", static_cast<unsigned>(n),
+                    static_cast<unsigned>(kChunk), static_cast<unsigned long>(done), errno);
+      if (shortWrites >= 5) break;
+    }
+  }
+  out.close();
+  const uint32_t tookMs = millis() - startedMs;
+  File in = SD_MMC.open(kPath, FILE_READ);
+  const uint32_t onCard = in ? static_cast<uint32_t>(in.size()) : 0;
+  if (in) in.close();
+  const bool removed = SD_MMC.remove(kPath);
+  Serial.printf("[con] wt: wrote %lu B in %lu ms, %lu short, file on card %lu B, removed=%d\n",
+                static_cast<unsigned long>(written), static_cast<unsigned long>(tookMs),
+                static_cast<unsigned long>(shortWrites), static_cast<unsigned long>(onCard), removed);
+  free(buffer);
+}
+
+void pollSerialConsole() {
+  static String line;
+  while (Serial.available() > 0) {
+    const char c = static_cast<char>(Serial.read());
+    if (c != 0x0A && c != 0x0D) {
+      if (line.length() < 96) line += c;
+      continue;
+    }
+    line.trim();
+    if (line == "df") {
+      Serial.printf("[con] card %llu/%llu MB used, type %d\n", SD_MMC.usedBytes() / (1024ULL * 1024ULL),
+                    SD_MMC.totalBytes() / (1024ULL * 1024ULL), static_cast<int>(SD_MMC.cardType()));
+    } else if (line.startsWith("ls")) {
+      String path = line.substring(2);
+      path.trim();
+      listCardDir(path.isEmpty() ? String("/") : path);
+    } else if (line.startsWith("wt")) {
+      const long kilobytes = line.substring(2).toInt();
+      writeTestCard(kilobytes > 0 ? static_cast<uint32_t>(kilobytes) : 256U);
+    } else if (line == "boot") {
+      printBootHistory();
+    } else if (!line.isEmpty()) {
+      Serial.printf("[con] unknown: %s (df, ls <dir>, wt <KB>, boot)\n", line.c_str());
+    }
+    line = "";
+  }
+}
+
 }  // namespace
 
 // Called very early by ESP-IDF before app_main/setup.
@@ -62,6 +243,7 @@ void setup() {
   esp_log_level_set("*", ESP_LOG_INFO);
   const bool pwrButtonHeld = BoardConfig::begin();
   logResetReason();
+  traceBoot(pwrButtonHeld);
   // Skip long serial wait — no need to block boot for 2s.
   delay(20);
 
@@ -96,7 +278,7 @@ void setup() {
     constexpr uint32_t kUsbHostPollMs = 100;
     bool hostAttached = false;
     for (uint32_t waited = 0; waited < kUsbHostGraceMs; waited += kUsbHostPollMs) {
-      if (Serial) {
+      if (usbHostHasPortOpen()) {
         hostAttached = true;
         break;
       }
@@ -127,7 +309,9 @@ void setup() {
 
 void loop() {
   const uint32_t now = millis();
+  gLastUptimeMs = now;
   app.update(now);
+  pollSerialConsole();
 
   // Lag hunt: how busy the UI loop is. One line per 5 s, e.g.
   // "[perf] loop 5 s: 812 passes, longest 420 ms, busy 61%".

@@ -58,8 +58,10 @@ void runUpdateScreens(DisplayManager &d, void (*dump)(const DisplayManager &, co
     for (const Rect &r : sink.rects) d.nanoDrawRect(r.x, r.y, r.w, r.h, 0xF81F);
     dump(d, (name + "_targets").c_str());
   };
-  auto panel = [&](bool scroll) {
+  auto panel = [&](bool scroll, uint8_t sizeLevel = 0) {
     ReaderPanelView v;
+    v.fontSizeLevel = sizeLevel;
+    v.lookId = 189;
     v.chapter = pl("Ksi~ega pierwsza: Gospodarstwo");
     v.progressLabel = "42%";
     v.timeLeft = "3 h 12 min";
@@ -81,7 +83,6 @@ void runUpdateScreens(DisplayManager &d, void (*dump)(const DisplayManager &, co
     }
     v.currentLocal = 17;
     v.menuId = 180;
-    v.chaptersId = 181;
     v.gotoId = 187;
     v.statusId = 187;
     v.rewindId = 188;
@@ -97,6 +98,8 @@ void runUpdateScreens(DisplayManager &d, void (*dump)(const DisplayManager &, co
     paintReaderPanel(d, sink, v);
   };
   frame("u_panel_rsvp", [&] { panel(false); });
+  frame("u_panel_rsvp_medium", [&] { panel(false, 1); });
+  frame("u_panel_rsvp_small", [&] { panel(false, 2); });
   frame("u_panel_scroll", [&] { panel(true); });
   d.setDarkMode(false);
   frame("u_panel_scroll_light", [&] { panel(true); });

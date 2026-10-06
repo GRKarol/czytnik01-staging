@@ -477,7 +477,7 @@ class DisplayManager {
   // anchors it, the neighbouring words dimmed. `area` spans the full width
   // so the word doesn't jump when reading starts.
   void nanoReaderPreview(const ui::Rect &area, const String &before, const String &word,
-                         const String &after);
+                         const String &after, uint8_t fontSizeLevel);
   // The reading screen itself inside `area`: reading background, word and
   // letter colors, typeface, size level, letter spacing, anchor and guide
   // lines exactly as set, shrunk only when the size does not fit. Used by
@@ -779,7 +779,7 @@ class DisplayManager {
   // scroll position.
   String articleReaderSourceCache_;
   std::vector<String> articleReaderLinesCache_;
-  uint8_t scrollFontSize_ = 4;
+  uint8_t scrollFontSize_ = 1;
   uint8_t scrollLineSpacing_ = 1;
   uint8_t scrollMargin_ = 1;
 

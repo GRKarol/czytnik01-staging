@@ -1,6 +1,7 @@
 #include "update/OtaUpdater.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <atomic>
 #include <memory>
 #include <new>
@@ -1186,10 +1187,15 @@ bool OtaUpdater::downloadAsset(const Config &config, const String &assetName,
       break;
     }
 
+    errno = 0;
     const size_t written = out.write(buffer, static_cast<size_t>(bytesRead));
     if (written != static_cast<size_t>(bytesRead)) {
       // The card took less than it was given: the file on it would be
       // shorter than the download and fail to load later.
+      const int writeErrno = errno;
+      Serial.printf("[dl] write short %u/%d at %u B errno=%d card %llu/%llu MB used\n",
+                    static_cast<unsigned>(written), bytesRead, static_cast<unsigned>(totalWritten), writeErrno,
+                    SD_MMC.usedBytes() / (1024ULL * 1024ULL), SD_MMC.totalBytes() / (1024ULL * 1024ULL));
       writeFailed = true;
       break;
     }

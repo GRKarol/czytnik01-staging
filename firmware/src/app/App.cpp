@@ -997,7 +997,7 @@ void App::begin() {
     readerFontSizeIndex_ = 0;
   }
   scrollFontSize_ = preferences_.getUChar(kPrefScrollFontSize, scrollFontSize_);
-  if (scrollFontSize_ > 8) scrollFontSize_ = 4;
+  if (scrollFontSize_ > 8) scrollFontSize_ = 1;
   scrollLineSpacing_ = preferences_.getUChar(kPrefScrollLineSpacing, scrollLineSpacing_);
   if (scrollLineSpacing_ > 2) scrollLineSpacing_ = 1;
   scrollMargin_ = preferences_.getUChar(kPrefScrollMargin, scrollMargin_);
@@ -1523,7 +1523,11 @@ void App::update(uint32_t nowMs) {
       companionSync_.end();
       autoSyncActive_ = false;
       autoSyncClientConnected_ = false;
-    } else if (!autoSyncClientConnected_ && !sessionWifiHold() && (nowMs - autoSyncStartedMs_ >= 30000)) {
+    } else if (!autoSyncClientConnected_ && !sessionWifiHold() &&
+               static_cast<int32_t>(nowMs - autoSyncStartedMs_) >= 30000) {
+      // Signed: the network is started with millis(), a few ms past this
+      // pass's nowMs, and the unsigned difference wrapped to ~49 days, so the
+      // boot network went down in the same pass it came up.
       Serial.println("[app] auto-sync: 30s timeout, no client — shutting down AP");
       companionSync_.end();
       autoSyncActive_ = false;
@@ -2259,7 +2263,7 @@ void App::reloadRuntimePreferences(uint32_t nowMs, bool rerender) {
     readerFontSizeIndex_ = 0;
   }
   scrollFontSize_ = preferences_.getUChar(kPrefScrollFontSize, scrollFontSize_);
-  if (scrollFontSize_ > 8) scrollFontSize_ = 4;
+  if (scrollFontSize_ > 8) scrollFontSize_ = 1;
   scrollLineSpacing_ = preferences_.getUChar(kPrefScrollLineSpacing, scrollLineSpacing_);
   if (scrollLineSpacing_ > 2) scrollLineSpacing_ = 1;
   scrollMargin_ = preferences_.getUChar(kPrefScrollMargin, scrollMargin_);

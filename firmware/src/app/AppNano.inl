@@ -1987,9 +1987,9 @@ void App::renderNanoReaderPanel() {
   view.before = phantomBeforeText();
   view.word = reader_.currentWord();
   view.after = phantomAfterText();
+  view.fontSizeLevel = readerFontSizeIndex_;
   view.menuId = kPanelMenu;
   view.menuLabel = tr3(TrKey3::NanoMenuLabel);
-  view.chaptersId = kPanelChapters;
   view.bookmarkId = kPanelBookmark;
   view.bookmarkFilled = isCurrentPositionSaved();
   view.rewindId = kPanelRewind;

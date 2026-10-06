@@ -1324,7 +1324,7 @@ class App {
   uint8_t brightnessLevelIndex_ = 4;
   uint8_t brightnessPercentSetting_ = 100;
   uint8_t readerFontSizeIndex_ = 0;
-  uint8_t scrollFontSize_ = 4;
+  uint8_t scrollFontSize_ = 1;
   uint8_t scrollLineSpacing_ = 1;
   uint8_t scrollMargin_ = 1;
   uint16_t pacingLongWordDelayMs_ = 50;
@@ -1697,6 +1697,7 @@ class App {
   bool showingHelpPopup_ = false;
   bool tutorialCompleted_ = false;
   uint8_t tutorialPage_ = 0;
+  uint32_t tutorialTurnMs_ = 0;  // last page turn, to swallow touch bounce
   std::vector<std::pair<ui::Rect, int>> tutorialTargets_;
   int tutorialPressedId_ = -1;
   std::vector<std::pair<ui::Rect, int>> wizardTargets_;

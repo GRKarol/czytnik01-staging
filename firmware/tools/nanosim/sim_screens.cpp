@@ -336,7 +336,6 @@ void runScreens(DisplayManager &d, void (*dump)(const DisplayManager &, const ch
       v.word = pl("przeczyta~l");
       v.after = pl("ksi~a~zk~e");
       v.menuId = 180;
-      v.chaptersId = 181;
       v.gotoId = 187;
       v.statusId = 187;
       v.rewindId = 188;

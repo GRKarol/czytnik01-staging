@@ -817,6 +817,84 @@ void DisplayManager::nanoSmallGlyph(int x, int y, char c, uint16_t color) {
 
 // ─── Reader typefaces on the Nano frame ─────────────────────────────────────
 
+namespace {
+
+// Letters shrunk below 100 %, kept for one typeface at one scale. The reader
+// panel draws ~90 of them (word + gray context) and renders twice per tap;
+// box-averaging every source block each time cost ~0.3 s a render.
+struct NanoScaledGlyph {
+  const uint8_t *source = nullptr;
+  uint8_t *alpha = nullptr;
+  uint16_t w = 0;
+  uint16_t h = 0;
+};
+
+NanoScaledGlyph gNanoScaledGlyphs[256];
+int gNanoScaledFace = -1;
+uint8_t gNanoScaledPercent = 0;
+
+void nanoDropScaledGlyphs() {
+  for (NanoScaledGlyph &entry : gNanoScaledGlyphs) {
+    heap_caps_free(entry.alpha);
+    entry = NanoScaledGlyph();
+  }
+}
+
+const NanoScaledGlyph *nanoScaledGlyph(char c, const ReaderGlyph &glyph, bool invert, uint8_t scalePercent,
+                                       DisplayManager::ReaderTypeface typeface) {
+  if (gNanoScaledFace != static_cast<int>(typeface) || gNanoScaledPercent != scalePercent) {
+    nanoDropScaledGlyphs();
+    gNanoScaledFace = static_cast<int>(typeface);
+    gNanoScaledPercent = scalePercent;
+  }
+  NanoScaledGlyph &entry = gNanoScaledGlyphs[LatinText::byteValue(c)];
+  // An SD font reload moves the bitmaps; the old pixels are stale then.
+  if (entry.alpha != nullptr && entry.source == glyph.bitmap) {
+    return &entry;
+  }
+  heap_caps_free(entry.alpha);
+  entry = NanoScaledGlyph();
+
+  const int glyphHeight = glyph.height;
+  const int scaledWidth = scaledPercentDimension(glyph.width, scalePercent);
+  const int scaledHeight = scaledPercentDimension(glyphHeight, scalePercent);
+  if (scaledWidth <= 0 || scaledHeight <= 0) {
+    return nullptr;
+  }
+  auto *alpha = static_cast<uint8_t *>(
+      heap_caps_malloc(static_cast<size_t>(scaledWidth) * scaledHeight, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (alpha == nullptr) {
+    return nullptr;
+  }
+  for (int dstRow = 0; dstRow < scaledHeight; ++dstRow) {
+    const int sourceYStart = (dstRow * glyphHeight) / scaledHeight;
+    const int sourceYEnd = std::min(glyphHeight, ((dstRow + 1) * glyphHeight + scaledHeight - 1) / scaledHeight);
+    for (int dstCol = 0; dstCol < scaledWidth; ++dstCol) {
+      const int sourceXStart = (dstCol * glyph.width) / scaledWidth;
+      const int sourceXEnd =
+          std::min(static_cast<int>(glyph.width), ((dstCol + 1) * glyph.width + scaledWidth - 1) / scaledWidth);
+      uint32_t alphaSum = 0;
+      uint32_t samples = 0;
+      for (int sy = sourceYStart; sy < sourceYEnd; ++sy) {
+        for (int sx = sourceXStart; sx < sourceXEnd; ++sx) {
+          const int ly = invert ? glyphHeight - 1 - sy : sy;
+          const int lx = invert ? glyph.width - 1 - sx : sx;
+          alphaSum += glyph.bitmap[ly * glyph.width + lx];
+          ++samples;
+        }
+      }
+      alpha[dstRow * scaledWidth + dstCol] = samples > 0 ? static_cast<uint8_t>(alphaSum / samples) : 0;
+    }
+  }
+  entry.source = glyph.bitmap;
+  entry.alpha = alpha;
+  entry.w = static_cast<uint16_t>(scaledWidth);
+  entry.h = static_cast<uint16_t>(scaledHeight);
+  return &entry;
+}
+
+}  // namespace
+
 void DisplayManager::nanoTypefaceGlyph(int x, int y, char c, uint16_t color, uint8_t scalePercent,
                                        ReaderTypeface typeface) {
   const ReaderGlyph glyph = glyphFor(c, typeface);
@@ -837,6 +915,27 @@ void DisplayManager::nanoTypefaceGlyph(int x, int y, char c, uint16_t color, uin
   }
   const int scaledWidth = scaledPercentDimension(glyph.width, scalePercent);
   const int scaledHeight = scaledPercentDimension(glyphHeight, scalePercent);
+  if (x >= nanoClipX1_ || x + scaledWidth <= nanoClipX0_ || y >= nanoClipY1_ || y + scaledHeight <= nanoClipY0_) {
+    return;
+  }
+  if (scalePercent < 100) {
+    const NanoScaledGlyph *cached = nanoScaledGlyph(c, glyph, invert, scalePercent, typeface);
+    if (cached != nullptr) {
+      const int row0 = std::max(0, nanoClipY0_ - y);
+      const int row1 = std::min(static_cast<int>(cached->h), nanoClipY1_ - y);
+      const int col0 = std::max(0, nanoClipX0_ - x);
+      const int col1 = std::min(static_cast<int>(cached->w), nanoClipX1_ - x);
+      for (int row = row0; row < row1; ++row) {
+        const uint8_t *alpha = cached->alpha + row * cached->w;
+        for (int col = col0; col < col1; ++col) {
+          if (alpha[col] != 0) {
+            nanoBlendPixel(x + col, y + row, color, alpha[col]);
+          }
+        }
+      }
+      return;
+    }
+  }
   if (scalePercent > 100) {
     for (int dstRow = 0; dstRow < scaledHeight; ++dstRow) {
       const int sourceY = upscaleSource256(dstRow, glyphHeight, scaledHeight);
@@ -908,14 +1007,15 @@ void DisplayManager::nanoTypefaceText(int x, int y, const String &text, uint16_t
 }
 
 void DisplayManager::nanoReaderPreview(const ui::Rect &area, const String &before, const String &word,
-                                       const String &after) {
+                                       const String &after, uint8_t fontSizeLevel) {
   if (word.isEmpty() || area.h < 8) {
     return;
   }
   const ReaderTypeface face = currentReaderTypeface();
   const int baseHeight = std::max(1, baseGlyphHeightForTypeface(face));
-  // The reading screen's largest size, shrunk only if the strip is shorter.
-  int scale = std::min(100, (static_cast<int>(area.h) * 100) / baseHeight);
+  // The size the reading screen will use, shrunk only if the strip is shorter.
+  const ReaderTextStyle style = readerTextStyle(fontSizeLevel, face);
+  int scale = std::min<int>(style.scalePercent, (static_cast<int>(area.h) * 100) / baseHeight);
   scale = std::max(20, scale);
   const uint8_t scalePercent = static_cast<uint8_t>(scale);
   const int textHeight = scaledPercentDimension(baseHeight, scalePercent);
@@ -926,7 +1026,7 @@ void DisplayManager::nanoReaderPreview(const ui::Rect &area, const String &befor
   const uint16_t ink = nanoColor(NanoRole::Foreground);
   const uint16_t focus = nanoColor(NanoRole::Accent);
   const uint16_t phantom = nanoMix565(nanoColor(NanoRole::Background), ink, 70);
-  const int gap = std::max(8, scaledPercentDimension(22, scalePercent));
+  const int gap = style.currentGap;
 
   nanoSetClip(area.x, area.y, area.w, area.h);
   // Anchor ticks where the reading screen puts its guide.

@@ -347,6 +347,7 @@ struct ReaderPanelView {
   String before;
   String word;
   String after;
+  uint8_t fontSizeLevel = 0;  // RSVP size on the reading screen (0 = largest)
   // Scroll reading mode: the page around the word instead of the RSVP line.
   bool scrollMode = false;
   std::vector<DisplayManager::ContextWord> words;
@@ -356,7 +357,6 @@ struct ReaderPanelView {
   int lookId = kNoTarget;     // Wyglad czytania (reading colors, typeface)
   int gotoId = kNoTarget;     // jump to %, page or chapter
   int statusId = kNoTarget;   // the top line + progress bar (also opens "go to")
-  int chaptersId = kNoTarget;
   int bookmarkId = kNoTarget;
   bool bookmarkFilled = false;
   int minusId = kNoTarget;

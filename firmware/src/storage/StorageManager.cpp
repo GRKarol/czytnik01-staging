@@ -14,6 +14,7 @@
 #include <esp_heap_caps.h>
 #include <utility>
 
+#include "app/generated/StarterTitles.h"
 #include "board/BoardConfig.h"
 #include "storage/BookExtras.h"
 #include "storage/EpubConverter.h"
@@ -1757,12 +1758,31 @@ String readRsvpDirectiveValue(const String &path, const char *directive) {
   return "";
 }
 
+// The name a book goes by when its @title cannot be read (the card was busy
+// or the file is still downloading). Starter books are files named
+// starter-en-1.rsvp and so on, so they take their title from the table the
+// wizard uses instead of showing the file name.
+String fallbackBookTitle(const String &path) {
+  const String name = displayNameWithoutExtension(path);
+  if (name.startsWith("starter-") && name.length() == 12 && name[10] == '-') {
+    static const char *const kCodes[StarterTitles::kLanguages] = {"en", "es", "fr", "de", "ro", "pl"};
+    const String code = name.substring(8, 10);
+    const int slot = name[11] - '1';
+    for (uint8_t language = 0; language < StarterTitles::kLanguages; ++language) {
+      if (code == kCodes[language] && slot >= 0 && slot < StarterTitles::kPerLanguage) {
+        return normalizeDisplayText(String(StarterTitles::kTitles[language][slot].title));
+      }
+    }
+  }
+  return normalizeDisplayText(name);
+}
+
 // What the "Opening book" screens call a book: its @title when it has one
 // (the starter books are files named starter-en-1.rsvp and so on), the file
 // name without the extension otherwise.
 String bookStatusLabel(const String &path) {
   const String title = readRsvpDirectiveValue(path, "@title");
-  return title.isEmpty() ? normalizeDisplayText(displayNameWithoutExtension(path)) : title;
+  return title.isEmpty() ? fallbackBookTitle(path) : title;
 }
 
 String indexedIndexPathFor(const String &path) { return path + ".ridx"; }
@@ -2163,7 +2183,7 @@ String StorageManager::bookDisplayName(size_t index) const {
     }
   }
 
-  return normalizeDisplayText(displayNameWithoutExtension(path));
+  return fallbackBookTitle(path);
 }
 
 String StorageManager::bookAuthorName(size_t index) const {
@@ -2311,7 +2331,7 @@ bool StorageManager::loadBookContent(size_t index, BookContent &book, String *lo
     const uint32_t parseElapsedMs = millis() - parseStartedMs;
     if (parsed) {
       if (book.title.isEmpty()) {
-        book.title = normalizeDisplayText(displayNameWithoutExtension(path));
+        book.title = fallbackBookTitle(path);
       }
       book.wordCount = book.words.size();
       BookExtras::applyChapters(path, book);
@@ -2401,7 +2421,7 @@ bool StorageManager::readIndexedMetadata(const String &path, BookMetadata &metad
   metadata.title = readRsvpDirectiveValue(path, "@title");
   metadata.author = readRsvpDirectiveValue(path, "@author");
   if (metadata.title.isEmpty()) {
-    metadata.title = normalizeDisplayText(displayNameWithoutExtension(path));
+    metadata.title = fallbackBookTitle(path);
   }
 
   if (header.paragraphCount > 0) {
@@ -2641,7 +2661,7 @@ bool StorageManager::buildIndexedBook(const String &path, BookMetadata &metadata
     metadata.paragraphStarts.push_back(0);
   }
   if (metadata.title.isEmpty()) {
-    metadata.title = normalizeDisplayText(displayNameWithoutExtension(path));
+    metadata.title = fallbackBookTitle(path);
   }
 
   header.magic = IndexedBookStore::kMagic;
