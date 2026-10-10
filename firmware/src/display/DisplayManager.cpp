@@ -1532,7 +1532,41 @@ DisplayManager::TypographyConfig DisplayManager::typographyConfig() const {
 }
 
 void DisplayManager::setScrollFontSize(uint8_t level) {
-  scrollFontSize_ = level <= 8 ? level : 1;
+  scrollFontSize_ = level <= 8 ? level : 3;
+}
+
+void DisplayManager::setScrollAlign(uint8_t align) {
+  scrollAlign_ = align <= kScrollAlignCenter ? align : kScrollAlignLeft;
+}
+
+std::vector<int> DisplayManager::scrollLineOffsets(const std::vector<int> &widths, int space, int available,
+                                                   bool lastOfParagraph) const {
+  std::vector<int> offsets;
+  offsets.reserve(widths.size());
+  int natural = 0;
+  for (size_t i = 0; i < widths.size(); ++i) {
+    natural += widths[i] + (i > 0 ? space : 0);
+  }
+  const int slack = std::max(0, available - natural);
+  int start = 0;
+  int extraPerGap = 0;
+  int extraRemainder = 0;
+  const int gaps = static_cast<int>(widths.size()) - 1;
+  if (scrollAlign_ == kScrollAlignCenter) {
+    start = slack / 2;
+  } else if (scrollAlign_ == kScrollAlignJustify && !lastOfParagraph && gaps > 0 &&
+             slack <= gaps * space * 3) {
+    // Stretch the gaps, but a line with only a word or two and a big hole
+    // stays ragged: huge gaps read worse than an uneven edge.
+    extraPerGap = slack / gaps;
+    extraRemainder = slack % gaps;
+  }
+  int x = start;
+  for (size_t i = 0; i < widths.size(); ++i) {
+    offsets.push_back(x);
+    x += widths[i] + space + extraPerGap + (static_cast<int>(i) < extraRemainder ? 1 : 0);
+  }
+  return offsets;
 }
 
 void DisplayManager::setScrollLineSpacing(uint8_t level) {
@@ -1545,12 +1579,12 @@ void DisplayManager::setScrollMargin(uint8_t level) {
 
 int DisplayManager::scrollLineHeightPx() const {
   // Line height for each of the 9 font size levels — proportional to text size + padding
-  static const int kLineHeights[] = {22, 25, 28, 31, 35, 39, 45, 53, 65};
+  static const int kLineHeights[] = {17, 20, 22, 25, 28, 31, 35, 39, 45};
   // Line spacing: 0=Compact(-4), 1=Normal(0), 2=Relaxed(+8)
   static const int kSpacingOffset[] = {-4, 0, 8};
   const uint8_t fs = scrollFontSize_ <= 8 ? scrollFontSize_ : 4;
   const uint8_t ls = scrollLineSpacing_ <= 2 ? scrollLineSpacing_ : 1;
-  return kLineHeights[fs] + kSpacingOffset[ls];
+  return std::max(15, kLineHeights[fs] + kSpacingOffset[ls]);
 }
 
 int DisplayManager::scrollMarginPx() const {
@@ -1569,9 +1603,10 @@ int DisplayManager::scrollSerifDivisor() const {
 }
 
 uint8_t DisplayManager::scrollScalePercent() const {
-  // 9 levels (0-8), each a distinct scalePercent for truly different text sizes
-  // Level 0: ~19px, Level 4: ~31px (default), Level 8: ~59px
-  static const uint8_t kScalePercents[] = {30, 35, 40, 45, 50, 56, 64, 76, 95};
+  // 9 levels (0-8), each a distinct scalePercent for truly different text sizes.
+  // 2026-10-10: two smaller steps at the bottom, the two largest (76, 95)
+  // gone; App::loadScrollFontSize() moves older saved levels up by two.
+  static const uint8_t kScalePercents[] = {22, 26, 30, 35, 40, 45, 50, 56, 64};
   const uint8_t fs = scrollFontSize_ <= 8 ? scrollFontSize_ : 4;
   // The steps are tuned on Atkinson's letters (41.5 px); faces drawn smaller
   // or larger are scaled to the same letter height.
@@ -3686,7 +3721,7 @@ void DisplayManager::renderScrollView(const std::vector<ContextWord> &words, uin
       "|" + chapterLabel + "|" + String(progressPercent) + "|o:" + overlayText + "|f:" +
       footerStatusLabel + "|b:" + batteryLabel_ + "|rc:" + readerChromeKey(chrome) + "|d:" +
       String(darkMode_ ? 1 : 0) + "|n:" + String(nightMode_ ? 1 : 0) + "|c:" +
-      String(wordsFingerprint);
+      String(wordsFingerprint) + "|al:" + String(scrollAlign_);
   if (!initialized_ || renderKey == lastRenderKey_) {
     return;
   }
@@ -3704,16 +3739,31 @@ void DisplayManager::renderScrollView(const std::vector<ContextWord> &words, uin
       break;
     }
 
-    int x = scrollMarginPx() + (line.paragraphStart ? kScrollParagraphIndent : 0);
+    // Centered lines drop the paragraph indent.
+    const int indent =
+        (line.paragraphStart && scrollAlign_ != kScrollAlignCenter) ? kScrollParagraphIndent : 0;
+    const int lineLeft = scrollMarginPx() + indent;
+    std::vector<String> visibleWords;
+    std::vector<int> widths;
+    int fitX = lineLeft;
     for (size_t wordIndex = line.start; wordIndex < line.end && wordIndex < words.size();
          ++wordIndex) {
-      const ContextWord &word = words[wordIndex];
+      const String visibleWord =
+          fitSerifTextScaled(words[wordIndex].text, virtualWidth - fitX - scrollMarginPx(), scaleP);
+      visibleWords.push_back(visibleWord);
+      widths.push_back(measureSerifTextWidthScaled(visibleWord, scaleP));
+      fitX += widths.back() + kScrollSpaceWidth;
+    }
+    // The window's last line may be cut mid-paragraph; it stays unstretched
+    // like a paragraph end rather than jump when the window moves.
+    const bool lastOfParagraph = lineIndex + 1 >= lines.size() || lines[lineIndex + 1].paragraphStart;
+    const std::vector<int> offsets =
+        scrollLineOffsets(widths, kScrollSpaceWidth, maxLineWidth - indent, lastOfParagraph);
+    for (size_t i = 0; i < visibleWords.size(); ++i) {
+      const ContextWord &word = words[line.start + i];
       const uint16_t color =
           (word.current && currentFocusHighlightEnabled()) ? focusColor() : wordColor();
-      const String visibleWord =
-          fitSerifTextScaled(word.text, virtualWidth - x - scrollMarginPx(), scaleP);
-      drawSerifTextScaledAt(visibleWord, x, lineY, color, scaleP);
-      x += measureSerifTextWidthScaled(visibleWord, scaleP) + kScrollSpaceWidth;
+      drawSerifTextScaledAt(visibleWords[i], lineLeft + offsets[i], lineY, color, scaleP);
     }
   }
 
@@ -4146,7 +4196,14 @@ void DisplayManager::renderTextEntry(const String &title, const String &prompt, 
   const int headerY = 4;
   const int fieldX = 10;
   const int fieldY = headerText.isEmpty() ? 8 : 14;
-  const int fieldWidth = virtualWidth - 20;
+  // A key placed level with the field (the "->" confirm) shortens it.
+  int fieldRight = virtualWidth - 10;
+  for (const Button &button : buttons) {
+    if (button.y < fieldY + 28) {
+      fieldRight = std::min(fieldRight, static_cast<int>(button.x) - 6);
+    }
+  }
+  const int fieldWidth = fieldRight - fieldX;
   const int fieldHeight = 28;
   constexpr uint8_t kFieldTextScalePercent = 36;
   const int fieldTextHeight = scaledPercentDimension(

@@ -14,10 +14,10 @@ constexpr int kWizardExtra = 3;
 constexpr int kWizardPagePrev = 4;
 constexpr int kWizardPageNext = 5;
 constexpr int kWizardChipBase = 100;
-// Language, theme, color, Wi-Fi, loading, menu look, menu font, reading
-// font, reading mode, app download, pairing, library.
+// Language, Wi-Fi, loading, menu look, reading theme, menu font, reading
+// font, reading mode, letter color, app download, pairing, library.
 constexpr size_t kWizardStepCount = 12;
-constexpr size_t kWizardStepWifi = 3;
+constexpr size_t kWizardStepWifi = 1;
 // Reading theme shown by each Motyw chip (wizard order Light, Dark, Night;
 // DisplayManager themes 0 dark, 1 light, 2 night).
 constexpr uint8_t kWizardThemeChip[] = {1, 0, 2};
@@ -106,25 +106,25 @@ bool App::wizardNanoScreen() const {
 size_t App::wizardStepIndex() const {
   switch (menuScreen_) {
     case MenuScreen::WelcomeLanguage:
-      return 0;
     case MenuScreen::WelcomeSdCard:
-    case MenuScreen::WelcomeTheme:
-      return 1;
-    case MenuScreen::WelcomeHighlightColor:
-      return 2;
+      return 0;
     case MenuScreen::WelcomeLoading:
     case MenuScreen::WelcomeSuper:
     case MenuScreen::WelcomeConfigureIntro:
-      return 4;
+      return 2;
     case MenuScreen::WelcomeMenuTheme:
-      return 5;
+      return 3;
+    case MenuScreen::WelcomeTheme:
+      return 4;
     case MenuScreen::WelcomeMenuFont:
-      return 6;
+      return 5;
     case MenuScreen::WelcomeFont:
-      return 7;
+      return 6;
     case MenuScreen::WelcomeReadingModePreview:
-      return welcomePreviewFromFont_ ? 7 : 8;
+      return welcomePreviewFromFont_ ? 6 : 7;
     case MenuScreen::WelcomeReadingMode:
+      return 7;
+    case MenuScreen::WelcomeHighlightColor:
       return 8;
     case MenuScreen::WelcomeConnect:
       return 9;
@@ -230,6 +230,14 @@ void App::renderWizardPage() {
           view.subtitle = tr4(TrKey4::WizSdFailedSub);
           view.nextLabel = tr4(TrKey4::WizSdFormat);
           break;
+        case WelcomeSdState::OwnCard:
+          // A card the flasher didn't prepare: format it, or keep its files
+          // and only download what's missing.
+          view.title = tr4(TrKey4::WizSdOwnTitle);
+          view.subtitle = tr4(TrKey4::WizSdOwnSub);
+          view.nextLabel = tr4(TrKey4::WizSdFormat);
+          view.extraLabel = tr4(TrKey4::WizSdKeepFiles);
+          break;
       }
       break;
     case MenuScreen::WelcomeMenuTheme: {
@@ -312,13 +320,13 @@ void App::renderWizardPage() {
       if (welcomePreviewFromFont_) {
         view.footer = typefaceDisplayName(typographyConfig_.typeface);
       }
-      if (welcomeReadingModePreviewMode_ == 0 && kTypographyPreviewWordCount > 0) {
-        const size_t current = welcomeReadingModePreviewWordIndex_ % kTypographyPreviewWordCount;
-        view.previewWord = kTypographyPreviewWords[current];
-        if (kTypographyPreviewWordCount > 1) {
-          view.previewBefore =
-              kTypographyPreviewWords[current == 0 ? kTypographyPreviewWordCount - 1 : current - 1];
-          view.previewAfter = kTypographyPreviewWords[(current + 1) % kTypographyPreviewWordCount];
+      if (welcomeReadingModePreviewMode_ == 0 && !welcomeRsvpPreviewWords_.empty()) {
+        const size_t count = welcomeRsvpPreviewWords_.size();
+        const size_t current = welcomeReadingModePreviewWordIndex_ % count;
+        view.previewWord = welcomeRsvpPreviewWords_[current];
+        if (count > 1) {
+          view.previewBefore = welcomeRsvpPreviewWords_[current == 0 ? count - 1 : current - 1];
+          view.previewAfter = welcomeRsvpPreviewWords_[(current + 1) % count];
         }
         view.previewSizeLevel = static_cast<uint8_t>(readerFontSizeIndex_);
       } else if (!welcomeScrollPreviewWords_.empty()) {
@@ -356,6 +364,7 @@ void App::renderWizardPage() {
           const unsigned booksTotal = g_bookDlTotal.load();
           if (fontDownloadInProgress_ && fontsTotal > 0) {
             view.status = String(tr4(TrKey4::WizFontsProgress)) + "  " + String(fontsDone) + "/" + String(fontsTotal);
+            view.footer = tr4(TrKey4::WizFontsLongNote);
           } else if (bookDownloadInProgress_ && booksTotal > 0) {
             view.status = String(tr4(TrKey4::WizBooksProgress)) + "  " + String(booksDone) + "/" + String(booksTotal);
           }
@@ -372,7 +381,7 @@ void App::renderWizardPage() {
     case MenuScreen::WelcomeSuper:
       view.body = nano::WizardBody::Message;
       view.title = tr3(TrKey3::WelcomeSuperTitle);
-      view.subtitle = tr4(TrKey4::WizSuperSub);
+      view.subtitle = tr3(TrKey3::WelcomeConfigureTitle);
       view.backId = nano::kNoTarget;
       view.autoPercent = static_cast<int>(std::min<uint32_t>(100, elapsed * 100UL / kWelcomeTimedMessageMs));
       break;
@@ -595,7 +604,9 @@ void App::handleWizardTouchAt(uint16_t x, uint16_t y, uint32_t touchStartMs, uin
       welcomePreviewFromFont_ = true;
       openWelcomeReadingModePreview(0);
     } else if (menuScreen_ == MenuScreen::WelcomeSdCard) {
-      openWelcomeTheme();
+      // Skip (no card / can't format) or, on an own card, keep its files.
+      welcomeOwnCardDecided_ = true;
+      openWelcomeWifi();
     } else if (menuScreen_ == MenuScreen::WelcomeLibrary) {
       finishWelcomeWizard(nowMs);
     }
@@ -615,7 +626,7 @@ void App::handleWizardTouchAt(uint16_t x, uint16_t y, uint32_t touchStartMs, uin
       selectWelcomeHighlightColorItem(nowMs);
       return;
     case MenuScreen::WelcomeMenuTheme:
-      openWelcomeMenuFont(nowMs);
+      openWelcomeTheme();
       return;
     case MenuScreen::WelcomeMenuFont:
       // From here on the menu keeps this font whatever the books use.
@@ -641,7 +652,7 @@ void App::handleWizardTouchAt(uint16_t x, uint16_t y, uint32_t touchStartMs, uin
       selectWelcomeReadingModeItem(nowMs);
       return;
     case MenuScreen::WelcomeSuper:
-      openWelcomeConfigureIntro(nowMs);
+      openWelcomeMenuTheme(nowMs);
       return;
     case MenuScreen::WelcomeConfigureIntro:
       openWelcomeMenuTheme(nowMs);

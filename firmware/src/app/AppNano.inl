@@ -1055,6 +1055,12 @@ void App::renderNanoTypography() {
                                     String(static_cast<int>(typographyConfig_.trackingPx)) + " px"));
     view.items.push_back(toggle(TypographyTuningPhantomWords, tr4(TrKey4::TypoNeighbours), phantomWordsEnabled_));
   } else {
+    nano::ListItem side;
+    side.kind = nano::ListItem::Kind::Setting;
+    side.id = TypographyTuningGuideSide;
+    side.label = tr4(TrKey4::GuideSideShort);
+    side.value = handednessLabel();
+    view.items.push_back(side);
     view.items.push_back(slider(TypographyTuningAnchor, tr4(TrKey4::TypoPosition),
                                 String(static_cast<unsigned>(effectiveAnchorPercent())) + "%"));
     view.items.push_back(slider(TypographyTuningGuideWidth, tr4(TrKey4::TypoLineLength),
@@ -1064,7 +1070,7 @@ void App::renderNanoTypography() {
     nano::ListItem reset;
     reset.kind = nano::ListItem::Kind::Button;
     reset.id = TypographyTuningReset;
-    reset.label = tr4(TrKey4::TypoDefaults);
+    // Icon only: five controls share this row.
     reset.icon = NanoIcon::Restart;
     view.items.push_back(reset);
   }
@@ -1994,7 +2000,6 @@ void App::renderNanoReaderPanel() {
   view.bookmarkFilled = isCurrentPositionSaved();
   view.rewindId = kPanelRewind;
   view.lookId = kPanelLook;
-  view.gotoId = usingStorageBook_ ? kPanelGoTo : nano::kNoTarget;
   view.statusId = usingStorageBook_ ? kPanelGoTo : nano::kNoTarget;
   view.minusId = kPanelWpmMinus;
   view.plusId = kPanelWpmPlus;
@@ -2027,6 +2032,7 @@ bool App::handleNanoReaderPanelTouch(const TouchEvent &event, uint32_t nowMs) {
   };
   if (event.phase == TouchPhase::Start) {
     nanoPanelBarTouch_ = nano::readerPanelBar().contains(event.x, event.y) ||
+                         nano::readerPanelRewindRect().contains(event.x, event.y) ||
                          (usingStorageBook_ && nano::readerPanelStatusArea().contains(event.x, event.y));
     if (!nanoPanelBarTouch_) {
       return false;

@@ -337,6 +337,11 @@ class DisplayManager {
   void setScrollFontSize(uint8_t level);
   void setScrollLineSpacing(uint8_t level);
   void setScrollMargin(uint8_t level);
+  // Scroll page line layout: 0 left, 1 justified, 2 centered.
+  static constexpr uint8_t kScrollAlignLeft = 0;
+  static constexpr uint8_t kScrollAlignJustify = 1;
+  static constexpr uint8_t kScrollAlignCenter = 2;
+  void setScrollAlign(uint8_t align);
   TypographyConfig typographyConfig() const;
   bool darkMode() const;
   bool nightMode() const;
@@ -779,11 +784,18 @@ class DisplayManager {
   // scroll position.
   String articleReaderSourceCache_;
   std::vector<String> articleReaderLinesCache_;
-  uint8_t scrollFontSize_ = 1;
+  uint8_t scrollFontSize_ = 3;
   uint8_t scrollLineSpacing_ = 1;
   uint8_t scrollMargin_ = 1;
+  uint8_t scrollAlign_ = kScrollAlignLeft;
 
   int scrollLineHeightPx() const;
+  // Left edge of each word of a scroll line for the current alignment.
+  // `widths` are the words' widths, `space` the normal gap, `available` the
+  // line's room after the indent; `lastOfParagraph` lines are never
+  // stretched when justified.
+  std::vector<int> scrollLineOffsets(const std::vector<int> &widths, int space, int available,
+                                     bool lastOfParagraph) const;
   int scrollMarginPx() const;
   int scrollSerifDivisor() const;
   uint8_t scrollScalePercent() const;

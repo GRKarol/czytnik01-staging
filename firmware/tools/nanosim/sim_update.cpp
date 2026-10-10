@@ -83,7 +83,7 @@ void runUpdateScreens(DisplayManager &d, void (*dump)(const DisplayManager &, co
     }
     v.currentLocal = 17;
     v.menuId = 180;
-    v.gotoId = 187;
+    // go to: the status line (statusId)
     v.statusId = 187;
     v.rewindId = 188;
     v.bookmarkId = 182;

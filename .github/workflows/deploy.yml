@@ -66,6 +66,15 @@ jobs:
       - name: Install npm deps
         run: npm ci
 
+      # The flasher's card step copies the font pack onto the reader's
+      # microSD over the cable (src/flasher/card-setup.ts); Pages serves it
+      # because release assets have no CORS headers for the browser.
+      - name: Font pack for the flasher card step
+        run: |
+          pip install --upgrade fonttools Pillow
+          bash firmware/tools/generate_font_pack.sh public/fonts
+          python3 tools/write_font_index.py public/fonts
+
       - name: Build PWA + flasher
         run: npm run build
         env:
@@ -77,6 +86,7 @@ jobs:
       - name: Sanity-check that the firmware binary ended up in dist/
         run: |
           test -f dist/firmware/czytnik01.bin || { echo "Missing dist/firmware/czytnik01.bin"; exit 1; }
+          test -f dist/fonts/index.json || { echo "Missing dist/fonts/index.json"; exit 1; }
           ls -lh dist/firmware/
 
       - name: Configure Pages

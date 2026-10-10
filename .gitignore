@@ -39,3 +39,6 @@ pliki_bota/
 android/keystore.properties
 *.keystore
 .tmp_scripts/
+
+# Font pack built by deploy.yml for the flasher card step
+public/fonts/

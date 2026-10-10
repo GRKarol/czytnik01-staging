@@ -1168,6 +1168,24 @@ void DisplayManager::nanoScrollPreview(const ui::Rect &area, const std::vector<C
     currentLine = 0;
   }
 
+  // The page's alignment (left, justified, centered) on the preview too.
+  for (size_t li = 0; li < lines.size(); ++li) {
+    std::vector<Placed> &line = lines[li];
+    if (line.empty()) {
+      continue;
+    }
+    std::vector<int> widths;
+    for (const Placed &placed : line) {
+      widths.push_back(placed.width);
+    }
+    const bool lastOfParagraph =
+        li + 1 >= lines.size() || lines[li + 1].empty() || words[lines[li + 1].front().index].paragraphStart;
+    const std::vector<int> offsets = scrollLineOffsets(widths, space, maxWidth, lastOfParagraph);
+    for (size_t i = 0; i < line.size(); ++i) {
+      line[i].x = offsets[i];
+    }
+  }
+
   const uint16_t background = nanoColor(NanoRole::Background);
   const uint16_t ink = nanoColor(NanoRole::Foreground);
   const uint16_t read = nanoMix565(background, ink, 110);

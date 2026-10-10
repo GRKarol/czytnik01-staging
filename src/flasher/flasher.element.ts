@@ -1,6 +1,7 @@
 import { LitElement, css, html, svg } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { APP_URL, BRAND_NAME, FIRMWARE_MANIFEST_URL } from "../shared/config";
+import { APP_URL, BRAND_NAME, FIRMWARE_MANIFEST_URL, FLASHER_URL } from "../shared/config";
+import { setUpCard, type CardSetupProgress } from "./card-setup";
 
 const iconFlower = (s = 80) => svg`
   <svg width=${s} height=${s} viewBox="0 0 100 100" aria-hidden="true">
@@ -21,6 +22,44 @@ const iconFlower = (s = 80) => svg`
 export class CzytnikFlasher extends LitElement {
   @state() private serialSupported = "serial" in navigator;
   @state() private isSecure = window.isSecureContext;
+  @state() private card: CardSetupProgress | null = null;
+  @state() private cardError = "";
+  @state() private cardBusy = false;
+
+  private async prepareCard() {
+    this.cardError = "";
+    this.cardBusy = true;
+    try {
+      await setUpCard(FLASHER_URL, (progress) => {
+        this.card = progress;
+      });
+    } catch (error) {
+      const message = (error as Error).message || String(error);
+      // Closing the port picker is not an error worth a red box.
+      if (!/No port selected|cancel/i.test(message)) this.cardError = message;
+      if (this.card?.phase !== "done") this.card = null;
+    } finally {
+      this.cardBusy = false;
+    }
+  }
+
+  private cardStatus() {
+    const card = this.card;
+    if (!card) return "";
+    const mb = (bytes: number) => (bytes / 1048576).toFixed(1);
+    switch (card.phase) {
+      case "connect":
+        return "Łączę z czytnikiem...";
+      case "wake":
+        return "Czytnik jeszcze nie odpowiada. Jeśli ekran jest ciemny, przytrzymaj PWR, aż się zaświeci.";
+      case "format":
+        return "Formatuję kartę...";
+      case "fonts":
+        return `Wgrywam czcionki: ${card.filesDone}/${card.filesTotal} (${mb(card.bytesDone)} z ${mb(card.bytesTotal)} MB)`;
+      case "done":
+        return "Gotowe. Karta ma wszystkie czcionki, kreator na czytniku pominie ich pobieranie.";
+    }
+  }
 
   render() {
     return html`
@@ -64,7 +103,40 @@ export class CzytnikFlasher extends LitElement {
         </section>
 
         <section class="card">
-          <h2>Krok 2 — Otwórz aplikację</h2>
+          <h2>Krok 2 — Przygotuj kartę microSD</h2>
+          <p>
+            Włóż kartę microSD do czytnika i zostaw kabel podłączony. Zamknij okno instalatora z
+            kroku 1, a potem naciśnij przycisk poniżej i wybierz ten sam port. Flasher sformatuje
+            kartę i wgra na nią wszystkie czcionki (około 9 MB, kilkadziesiąt sekund).
+          </p>
+          <p class="warning">Formatowanie usuwa wszystko, co jest na karcie.</p>
+          <button
+            class="cta"
+            ?disabled=${this.cardBusy || !this.serialSupported}
+            @click=${() => this.prepareCard()}
+          >
+            ${this.cardBusy ? "Trwa przygotowanie..." : "Przygotuj kartę"}
+          </button>
+          ${this.card
+            ? html`<div class="progress">
+                  <div
+                    class="bar"
+                    style="width: ${this.card.bytesTotal
+                      ? Math.round((this.card.bytesDone * 100) / this.card.bytesTotal)
+                      : 0}%"
+                  ></div>
+                </div>
+                <p class="status">${this.cardStatus()}</p>`
+            : ""}
+          ${this.cardError ? html`<p class="warning error">${this.cardError}</p>` : ""}
+          <p class="note">
+            Jeśli pominiesz ten krok i włożysz własną kartę, czytnik w kreatorze zaproponuje jej
+            sformatowanie i sam pobierze potrzebne pliki przez Wi-Fi. Zajmie to około 10 minut.
+          </p>
+        </section>
+
+        <section class="card">
+          <h2>Krok 3 — Otwórz aplikację</h2>
           <p>
             Po zainstalowaniu firmware otwórz aplikację ${BRAND_NAME} i połącz się z
             urządzeniem przez WiFi lub Bluetooth. Aplikację możesz dodać do ekranu
@@ -227,6 +299,37 @@ export class CzytnikFlasher extends LitElement {
 
     ol {
       padding-left: 1.35rem;
+    }
+
+    .cta[disabled] {
+      opacity: 0.6;
+      cursor: progress;
+    }
+
+    .progress {
+      margin-top: 16px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--sky-2);
+      overflow: hidden;
+    }
+    .progress .bar {
+      height: 100%;
+      background: var(--accent);
+      transition: width 0.2s ease;
+    }
+
+    .status,
+    .note {
+      font-size: 0.92rem;
+    }
+    .note {
+      color: var(--muted);
+    }
+    .warning.error {
+      border-left-color: #d64545;
+      background: rgba(214, 69, 69, 0.08);
+      color: #a32f2f;
     }
 
     code {

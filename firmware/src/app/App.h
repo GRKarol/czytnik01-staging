@@ -61,8 +61,13 @@ class App {
 
   void begin();
   void update(uint32_t nowMs);
+  // Card set-up from the web flasher over the cable (main.cpp console).
+  void handleProvisionCommand(const String &line);
 
  private:
+  void renderProvisionStatus(const String &line1, const String &line2);
+  bool provisionActive_ = false;
+  uint16_t provisionFilesDone_ = 0;
   static constexpr size_t kOtaVersionLabelMax = 32;
   static constexpr size_t kOtaSummaryLabelMax = 40;
   static constexpr size_t kOtaDetailLabelMax = 96;
@@ -527,6 +532,7 @@ class App {
   // Shown after the language step only when the card did not mount: asks
   // for a card, or offers to format one the reader cannot read.
   void openWelcomeSdCard(uint32_t nowMs);
+  bool welcomeOwnCardPending();
   void selectWelcomeSdCardNext(uint32_t nowMs);
   void openWelcomeTheme();
   void selectWelcomeThemeItem(uint32_t nowMs);
@@ -654,8 +660,11 @@ class App {
   String scrollFontSizeLabel() const;
   String scrollLineSpacingLabel() const;
   String scrollMarginLabel() const;
+  String scrollAlignLabel() const;
+  void loadScrollFontSize();
   String pauseModeLabel() const;
   String handednessLabel() const;
+  String guideSideTitle() const;
   String savePointNameModeLabel() const;
   String navModeLabel() const;
   String readerFontSizeLabel() const;
@@ -727,8 +736,15 @@ class App {
   void enterUsbTransfer(uint32_t nowMs);
   void updateUsbTransfer(uint32_t nowMs);
   void exitUsbTransfer(uint32_t nowMs);
-  void enterStandby(uint32_t nowMs);
+  // screenOff: straight to a dark screen (short PWR press) instead of the
+  // dim screensaver that asks before going dark.
+  void enterStandby(uint32_t nowMs, bool screenOff = false);
   void exitStandby(uint32_t nowMs);
+  void turnScreenOffFromPower(uint32_t nowMs);
+  void stopActivityForScreenOff();
+  void handleStandbyTouch(const TouchEvent &event, uint32_t nowMs);
+  void renderStandbyAsk(uint32_t nowMs);
+  void runMenuButton(uint32_t nowMs);
   void seedStandbyScreensaver(uint32_t nowMs);
   void stepStandbyScreensaver(uint32_t nowMs);
   void seedStandbyLife(uint32_t nowMs);
@@ -1245,8 +1261,16 @@ class App {
   bool welcomePreviewFromFont_ = false;
   bool wizardBookPickerActive_ = false;
   uint32_t welcomeScreenEnteredMs_ = 0;
-  enum class WelcomeSdState : uint8_t { Missing, Unreadable, ConfirmFormat, Formatting, Failed };
+  // OwnCard: a readable card without the font pack (not prepared by the
+  // flasher), offered a format or a plain download.
+  enum class WelcomeSdState : uint8_t { Missing, Unreadable, ConfirmFormat, Formatting, Failed, OwnCard };
   WelcomeSdState welcomeSdState_ = WelcomeSdState::Missing;
+  // The own-card question was answered this boot (format or keep files):
+  // Dalej from the language page doesn't ask again.
+  bool welcomeOwnCardDecided_ = false;
+  // Language whose starter books the loading step finished for this boot
+  // (0xFF none): Dalej from Wi-Fi skips the loading step while it matches.
+  uint8_t welcomeAssetsLang_ = 0xFF;
   // Card check at boot (AppSdSetup.inl).
   enum class SdSetupState : uint8_t {
     NeedsFormat,
@@ -1315,6 +1339,8 @@ class App {
   uint32_t welcomeReadingModePreviewLastTickMs_ = 0;
   size_t welcomeReadingModePreviewWordIndex_ = 0;
   std::vector<DisplayManager::ContextWord> welcomeScrollPreviewWords_;
+  // RSVP preview words in the menu language (TrKey4::WizRsvpSample).
+  std::vector<String> welcomeRsvpPreviewWords_;
   size_t chapterPickerSelectedIndex_ = 0;
   size_t chapterTransitionIndex_ = static_cast<size_t>(-1);
   size_t restartConfirmSelectedIndex_ = 0;
@@ -1324,9 +1350,10 @@ class App {
   uint8_t brightnessLevelIndex_ = 4;
   uint8_t brightnessPercentSetting_ = 100;
   uint8_t readerFontSizeIndex_ = 0;
-  uint8_t scrollFontSize_ = 1;
+  uint8_t scrollFontSize_ = 3;
   uint8_t scrollLineSpacing_ = 1;
   uint8_t scrollMargin_ = 1;
+  uint8_t scrollAlign_ = 0;  // DisplayManager::kScrollAlign*
   uint16_t pacingLongWordDelayMs_ = 50;
   uint16_t pacingComplexWordDelayMs_ = 50;
   uint16_t pacingPunctuationDelayMs_ = 50;
@@ -1635,6 +1662,24 @@ class App {
   bool standbyComboHandled_ = false;
   bool standbyButtonsReleased_ = false;
   bool standbyScreenOffActive_ = false;
+  // Idle screensaver: Dim (backlight almost off), then Ask ("turn the
+  // screen off?", 10 s), then Off (panel asleep). A short PWR press goes
+  // to Off at once.
+  enum class StandbyPhase : uint8_t { Dim, Ask, Off };
+  StandbyPhase standbyPhase_ = StandbyPhase::Dim;
+  uint32_t standbyPhaseMs_ = 0;
+  // Double tap wakes the dark screen: when the last tap ended.
+  uint32_t standbyLastTapMs_ = 0;
+  uint32_t standbyTouchStartMs_ = 0;
+  bool standbyTouchDown_ = false;
+  std::vector<std::pair<ui::Rect, int>> standbyAskTargets_;
+  int standbyAskPressed_ = -1;
+  int standbyAskShownSeconds_ = -1;
+  // The dark screen took the phone network down (brought back on wake when
+  // the Wi-Fi session setting keeps it up).
+  bool standbyStoppedWifi_ = false;
+  // Release of the PWR press that woke the screen (see handlePowerButton).
+  bool powerWakeReleaseIgnored_ = false;
   bool chapterTransitionVisible_ = false;
   bool batteryWarningOverlayVisible_ = false;
   bool otaCheckInProgress_ = false;

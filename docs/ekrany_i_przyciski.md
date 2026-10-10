@@ -60,7 +60,7 @@ Cel: status "Bateria/Wyłączanie" przy krytycznym/niskim poziomie. Bez przycisk
 ---
 
 ### Główne menu (MenuScreen::Main) — `renderMainMenu`
-Cel: punkt wejścia do menu (otwierany przyciskiem PWR z czytnika).
+Cel: punkt wejścia do menu (otwierany krótkim naciśnięciem przycisku BOOT/Reboot z czytnika).
 Lista (od góry):
 - [warunkowo] „>> Update vX.Y.Z" — pojawia się tylko gdy dostępna aktualizacja OTA — od razu uruchamia `runFirmwareUpdate` (bez ekranu potwierdzenia, patrz uwaga niżej).
 - „Czytaj" — zamyka menu, wraca do czytnika (Paused).
@@ -69,7 +69,7 @@ Lista (od góry):
 - „Ustawienia" — otwiera SettingsHome.
 - „Pluginy" — otwiera PluginsList.
 - „Wyłącz" — usypia urządzenie (deep sleep).
-Typ layoutu: prosta lista przycisków (compact menu). Potrójny tap przycisku PWR na tym ekranie tworzy szybki punkt zapisu (skrót, nie przycisk na ekranie).
+Typ layoutu: prosta lista przycisków (compact menu). Potrójny tap przycisku BOOT/Reboot na tym ekranie tworzy szybki punkt zapisu (skrót, nie przycisk na ekranie).
 
 ### SettingsHome — `renderSettings`
 Cel: hub ustawień.
@@ -82,7 +82,7 @@ Cel: hub ustawień.
 - O aplikacji/Pomoc — otwiera SettingsAbout.
 - [tylko dev mode] Wi-Fi zaawansowane — otwiera WifiSettings.
 - [tylko dev mode] Aktualizacja firmware — uruchamia sprawdzanie/instalację OTA.
-Typ layoutu: lista. Zaznaczona pozycja może mieć dopisane „ ?" gdy dostępna podpowiedź (podpowiedź wywołuje się krótkim wciśnięciem fizycznego przycisku BOOT, nie dotykiem).
+Typ layoutu: lista. Zaznaczona pozycja może mieć dopisane „ ?" gdy dostępna podpowiedź (podpowiedź otwiera kółko ?, BOOT/Reboot cofa o ekran).
 
 ### SettingsDisplay — `renderSettings` (menuScreen SettingsDisplay)
 Lista przełączników/cykli:
@@ -307,7 +307,7 @@ Typ layoutu: lista.
 
 ### Standby (AppState::Standby) — wygaszacz ekranu
 Cel: animacja oszczędzająca ekran po czasie bezczynności (styl wybierany w ScreensaverSettings: Życie/Labirynt/Voronoi/Gwiazdy/Matrix/Ekran wyłączony).
-- Brak reakcji na dotyk — wybudzenie tylko fizyczną kombinacją BOOT+PWR.
+- Fazy: przyciemnienie (30 s, jedno dotknięcie budzi) -> pytanie „Wygasić ekran?" z licznikiem 10 s -> ekran zgaszony. Zgaszony ekran budzi dowolny przycisk albo dwa szybkie stuknięcia.
 - Opcjonalny, delikatnie pulsujący tekst podpowiedzi (fade in/out co 10s).
 Typ layoutu: pełnoekranowa animacja, zero interakcji dotykowej.
 
@@ -335,9 +335,9 @@ Boot → (pierwsze uruchomienie) WelcomeLanguage → WelcomeTheme → WelcomeHig
      → WelcomePacing → WelcomeConnect → TutorialStep1 → ... → TutorialStep5 → Paused (czytnik)
 Boot → (kolejne uruchomienia) Paused/Playing (czytnik)
 
-Paused/Playing (czytnik) ⇄ Main            [PWR toggluje]
+Paused/Playing (czytnik) ⇄ Main            [BOOT/Reboot toggluje]
 Paused/Playing → SavePointNameEntry (TextEntry)   [przycisk SP]
-Paused/Playing ⇄ Standby                    [bezczynność / kombinacja BOOT+PWR]
+Paused/Playing ⇄ Standby                    [bezczynność / krótki PWR (od razu zgaszony ekran) / kombinacja BOOT+PWR]
 
 Main → SettingsHome
 Main → BookPicker (Biblioteka)

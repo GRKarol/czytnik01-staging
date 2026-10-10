@@ -195,3 +195,144 @@ void App::renderStandbyScene(uint32_t nowMs, const String &hint, uint8_t hintAlp
     }
   }
 }
+
+// ─── Screen off (PWR) and the screensaver question ──────────────────────────
+
+namespace {
+constexpr int kStandbyAskNo = 1;
+constexpr int kStandbyAskYes = 2;
+}  // namespace
+
+void App::turnScreenOffFromPower(uint32_t nowMs) {
+  if (state_ == AppState::Booting || state_ == AppState::UsbTransfer || state_ == AppState::Sleeping ||
+      state_ == AppState::Standby || powerOffStarted_) {
+    return;
+  }
+  // The first-run wizard and the card set-up run downloads and the pairing
+  // network that a dark screen would stop half way.
+  if (savedWizardStep_ != 0xFF || menuScreen_ == MenuScreen::SdCardSetup || cardReaderMode_) {
+    Serial.println("[app] PWR: screen stays on during set-up");
+    return;
+  }
+  if (showingHelpPopup_) {
+    dismissHelpPopup(nowMs);
+  }
+  Serial.println("[app] PWR: screen off");
+  enterStandby(nowMs, true);
+}
+
+void App::stopActivityForScreenOff() {
+  // Reading pauses in enterStandby(); here the phone network goes too.
+  firstSessionSyncHold_ = false;
+  if (autoSyncActive_) {
+    stopAutoSyncAccessPoint("screen off");
+    standbyStoppedWifi_ = true;
+  }
+}
+
+void App::renderStandbyAsk(uint32_t nowMs) {
+  const uint32_t elapsed = nowMs - standbyPhaseMs_;
+  const int secondsLeft =
+      static_cast<int>((kStandbyAskMs > elapsed ? kStandbyAskMs - elapsed : 0) + 999) / 1000;
+  if (secondsLeft == standbyAskShownSeconds_ && standbyAskPressed_ < 0) {
+    return;
+  }
+  standbyAskShownSeconds_ = secondsLeft;
+
+  nano::ConfirmView view;
+  view.question = tr4(TrKey4::SaverAskTitle);
+  view.detail = String(tr4(TrKey4::SaverAskCountdown)) + " " + String(secondsLeft) + " s";
+  nano::ConfirmView::Action no;
+  no.id = kStandbyAskNo;
+  no.label = tr4(TrKey4::SaverAskNo);
+  view.actions.push_back(no);
+  nano::ConfirmView::Action yes;
+  yes.id = kStandbyAskYes;
+  yes.label = tr4(TrKey4::SaverAskYes);
+  view.actions.push_back(yes);
+
+  const bool classicColors = navMode_ != NavMode::Modern;
+  if (classicColors) {
+    display_.overrideNanoPalette(DisplayManager::kNanoPaletteClassic, false);
+  }
+  display_.setModernCardStyle(true);
+  standbyAskTargets_.clear();
+  NanoPanelSink sink(standbyAskTargets_, standbyAskPressed_);
+  display_.nanoBeginFrame();
+  nano::paintConfirm(display_, sink, view);
+  display_.nanoEndFrame();
+  if (classicColors) {
+    display_.overrideNanoPalette(nanoPalette_, nanoOwnAccent_);
+  }
+}
+
+void App::handleStandbyTouch(const TouchEvent &event, uint32_t nowMs) {
+  if (standbyPhase_ == StandbyPhase::Ask) {
+    auto targetAt = [this](uint16_t x, uint16_t y) {
+      for (const auto &target : standbyAskTargets_) {
+        if (target.first.contains(x, y)) {
+          return target.second;
+        }
+      }
+      return -1;
+    };
+    if (event.phase == TouchPhase::Start) {
+      standbyAskPressed_ = targetAt(event.x, event.y);
+      if (standbyAskPressed_ >= 0) {
+        standbyAskShownSeconds_ = -1;
+        renderStandbyAsk(nowMs);
+      }
+      return;
+    }
+    if (event.phase != TouchPhase::End) {
+      return;
+    }
+    const int pressed = standbyAskPressed_;
+    standbyAskPressed_ = -1;
+    standbyAskShownSeconds_ = -1;
+    if (pressed >= 0 && targetAt(event.x, event.y) == pressed) {
+      if (pressed == kStandbyAskYes) {
+        Serial.println("[app] screensaver: screen off (asked)");
+        standbyPhase_ = StandbyPhase::Off;
+        standbyPhaseMs_ = nowMs;
+        stopActivityForScreenOff();
+        seedStandbyScreenOff(nowMs);
+      } else {
+        exitStandby(nowMs);
+      }
+      return;
+    }
+    renderStandbyAsk(nowMs);
+    return;
+  }
+
+  if (standbyPhase_ == StandbyPhase::Dim) {
+    // The screen is still lit, only dim: one tap brings it back.
+    if (event.phase == TouchPhase::End) {
+      exitStandby(nowMs);
+    }
+    return;
+  }
+
+  // Dark screen: two quick taps wake it, so a pocket doesn't.
+  if (event.phase == TouchPhase::Start) {
+    standbyTouchDown_ = true;
+    standbyTouchStartMs_ = nowMs;
+    return;
+  }
+  if (event.phase != TouchPhase::End || !standbyTouchDown_) {
+    return;
+  }
+  standbyTouchDown_ = false;
+  if (nowMs - standbyTouchStartMs_ > kStandbyTapMaxMs) {
+    standbyLastTapMs_ = 0;
+    return;
+  }
+  if (standbyLastTapMs_ != 0 && nowMs - standbyLastTapMs_ <= kStandbyDoubleTapMs) {
+    standbyLastTapMs_ = 0;
+    Serial.println("[app] double tap: screen on");
+    exitStandby(nowMs);
+    return;
+  }
+  standbyLastTapMs_ = nowMs;
+}

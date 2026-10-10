@@ -797,37 +797,59 @@ Rect readerPanelBar() { return Rect(0, 128, kScreenW, kScreenH - 128); }
 
 Rect readerPanelStatusArea() { return Rect(0, 0, kScreenW - 100, 22); }
 
+Rect readerPanelRewindRect() { return Rect(8, 50, 44, 44); }
+
 void paintReaderPanel(DisplayManager &d, Sink &sink, const ReaderPanelView &view) {
-  // Top line: chapter left, time left + percent right, battery.
+  // Top line: chapter left, time left + percent right, battery. The whole
+  // line is the way to "go to" (%, page, chapter); the target icon says so.
   const int statusW = 150;
+  constexpr int kStatusIconW = 20;
   d.nanoBatteryInline(Rect(kScreenW - 104, 2, 96, 20), false, Align::End);
   String status = view.progressLabel;
   if (!view.timeLeft.isEmpty()) {
     status = view.timeLeft + "  -  " + status;
   }
   const bool statusPressed = sink.pressed(view.statusId);
+  const uint16_t statusSurface = d.nanoColor(statusPressed ? Role::SurfaceMuted : Role::Background);
   if (statusPressed) {
-    d.nanoFillRoundRect(4, 1, kScreenW - 112, 22, 6, d.nanoColor(Role::SurfaceMuted));
+    d.nanoFillRoundRect(4, 1, kScreenW - 112, 22, 6, statusSurface);
   }
-  d.nanoLabel(Rect(kScreenW - 112 - statusW, 2, statusW, 20), status, 1, Role::Muted, Align::End);
-  d.nanoLabel(Rect(12, 2, kScreenW - 136 - statusW, 20), view.chapter, 1, Role::Muted);
+  int statusRight = kScreenW - 112;
+  if (view.statusId != kNoTarget) {
+    d.nanoIcon(Rect(statusRight - kStatusIconW, 2, kStatusIconW, 20), Icon::Target, d.nanoColor(Role::Muted),
+               statusSurface);
+    statusRight -= kStatusIconW + 4;
+  }
+  d.nanoLabel(Rect(statusRight - statusW, 2, statusW, 20), status, 1, Role::Muted, Align::End);
+  d.nanoLabel(Rect(12, 2, statusRight - statusW - 24, 20), view.chapter, 1, Role::Muted);
   addTarget(sink, readerPanelStatusArea(), view.statusId);
 
+  // The word (or the page) with a column free on each side, so it stays
+  // centered; the left one holds "back to the start of the sentence".
   const Rect words = readerPanelWordArea();
+  constexpr int kSideColumn = 56;
+  const Rect text(kSideColumn, words.y, kScreenW - kSideColumn * 2, words.h);
   if (view.scrollMode) {
-    d.nanoScrollPreview(Rect(0, words.y, kScreenW, words.h - (view.hint.isEmpty() ? 0 : 14)), view.words,
+    d.nanoScrollPreview(Rect(text.x, text.y, text.w, text.h - (view.hint.isEmpty() ? 0 : 14)), view.words,
                         view.currentLocal);
   } else {
-    d.nanoReaderPreview(Rect(0, words.y + 2, kScreenW, words.h - (view.hint.isEmpty() ? 4 : 18)), view.before,
+    d.nanoReaderPreview(Rect(text.x, text.y + 2, text.w, text.h - (view.hint.isEmpty() ? 4 : 18)), view.before,
                         view.word, view.after, view.fontSizeLevel);
+  }
+  if (view.rewindId != kNoTarget) {
+    const Rect rewind = readerPanelRewindRect();
+    const uint16_t surface = d.nanoColor(sink.pressed(view.rewindId) ? Role::SurfaceActive : Role::SurfaceMuted);
+    d.nanoFillRoundRect(rewind.x, rewind.y, rewind.w, rewind.h, rewind.h / 2, surface);
+    d.nanoIcon(rewind, Icon::Rewind, d.nanoColor(Role::Foreground), surface);
+    addTarget(sink, rewind, view.rewindId);
   }
   if (!view.hint.isEmpty()) {
     d.nanoLabel(Rect(12, bottom(words) - 16, kScreenW - 24, 16), view.hint, 1, Role::Subtle, Align::Center);
   }
   d.nanoProgress(Rect(12, 122, kScreenW - 24, 3), view.progressPercent, 0, 100);
 
-  // Bottom bar: Menu | go to | bookmark | << | colors | - WPM + | Czytaj.
-  // Chapters live under "go to", so they have no button of their own.
+  // Bottom bar: Menu | bookmark | colors | - WPM + | Czytaj. "Go to" is the
+  // top line, the sentence rewind sits by the word.
   const int y = 132;
   const int h = kScreenH - y - 4;
   constexpr int kSmall = 48;
@@ -845,7 +867,6 @@ void paintReaderPanel(DisplayManager &d, Sink &sink, const ReaderPanelView &view
     addTarget(sink, rect, id);
     x += kSmall + kGap;
   };
-  small(view.gotoId, Icon::Target);
   const Rect bookmark(x, y, kSmall, h);
   const uint16_t bookmarkSurface = d.nanoColor(sink.pressed(view.bookmarkId) ? Role::SurfaceActive : Role::SurfaceMuted);
   d.nanoFillRoundRect(bookmark.x, bookmark.y, bookmark.w, bookmark.h, 8, bookmarkSurface);
@@ -859,7 +880,6 @@ void paintReaderPanel(DisplayManager &d, Sink &sink, const ReaderPanelView &view
   }
   addTarget(sink, bookmark, view.bookmarkId);
   x += bookmark.w + kGap;
-  small(view.rewindId, Icon::Rewind);
   small(view.lookId, Icon::Palette);
 
   // WPM stepper: one pill with - and + ends.
@@ -1736,7 +1756,15 @@ void paintTypography(DisplayManager &d, Sink &sink, const TypographyView &view) 
   }
   const int gaps = kGap * (cells - 1);
   const int themeW = themeCount > 0 ? std::min(100, (row.w - gaps) / cells) : 0;
-  const int otherW = otherCount > 0 ? (row.w - gaps - themeW * themeCount) / otherCount : 0;
+  // Icon-only buttons (no label) stay narrow, the rest share the width.
+  constexpr int kNarrowW = 48;
+  int narrowCount = 0;
+  for (const ListItem &item : view.items) {
+    narrowCount += item.label.isEmpty() && item.icon != Icon::None ? 1 : 0;
+  }
+  const int wideCount = otherCount - narrowCount;
+  const int otherW =
+      wideCount > 0 ? (row.w - gaps - themeW * themeCount - kNarrowW * narrowCount) / wideCount : kNarrowW;
   int x = row.x;
   int cell = 0;
   auto nextRect = [&](int width) {
@@ -1757,7 +1785,7 @@ void paintTypography(DisplayManager &d, Sink &sink, const TypographyView &view) 
     addTarget(sink, rect, view.letterColorId);
   }
   for (const ListItem &item : view.items) {
-    paintListItem(d, sink, nextRect(otherW), item);
+    paintListItem(d, sink, nextRect(item.label.isEmpty() && item.icon != Icon::None ? kNarrowW : otherW), item);
   }
 }
 

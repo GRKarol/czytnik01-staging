@@ -473,6 +473,7 @@ bool App::helpTopicFor(MenuScreen screen, int id, HelpTopic &topic) const {
         case kSettingsPacingScrollFontSizeIndex: return pick(HelpTopic::ScrollFontSize);
         case kSettingsPacingScrollLineSpacingIndex: return pick(HelpTopic::ScrollLineSpacing);
         case kSettingsPacingScrollMarginIndex: return pick(HelpTopic::ScrollMargins);
+        case kSettingsPacingScrollAlignIndex: return pick(HelpTopic::ScrollAlign);
         case kSettingsPacingScrollPreviewIndex: return pick(HelpTopic::ScrollPreview);
         default: return false;
       }

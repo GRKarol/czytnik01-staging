@@ -240,6 +240,14 @@ constexpr uint8_t kBatteryLowWarningPercent = 5;
 constexpr uint8_t kBatteryCriticalPercent = 1;
 constexpr uint8_t kBatteryCriticalConsecutiveSamples = 2;
 constexpr uint32_t kStandbyWakeGraceMs = 900;
+// Screensaver: this long almost dark, then the "turn the screen off?"
+// question for kStandbyAskMs before the panel goes to sleep.
+constexpr uint32_t kStandbyDimMs = 30000;
+constexpr uint32_t kStandbyAskMs = 10000;
+constexpr uint8_t kStandbyDimPercent = 2;
+// Two taps this close wake the dark screen.
+constexpr uint32_t kStandbyDoubleTapMs = 450;
+constexpr uint32_t kStandbyTapMaxMs = 350;
 constexpr uint32_t kStandbyFrameMs = 500;
 constexpr uint16_t kStandbyLifeCellPixels = 2;
 constexpr uint16_t kStandbyLifeColumns = BoardConfig::DISPLAY_WIDTH / kStandbyLifeCellPixels;
@@ -300,6 +308,7 @@ enum TypographyTuningItem : size_t {
   TypographyTuningGuideWidth,
   TypographyTuningGuideGap,
   TypographyTuningReset,
+  TypographyTuningGuideSide,
   TypographyTuningItemCount,
 };
 
@@ -431,7 +440,8 @@ constexpr size_t kSettingsPacingResetIndex = 7;
 constexpr size_t kSettingsPacingScrollFontSizeIndex = 2;
 constexpr size_t kSettingsPacingScrollLineSpacingIndex = 3;
 constexpr size_t kSettingsPacingScrollMarginIndex = 4;
-constexpr size_t kSettingsPacingScrollPreviewIndex = 5;
+constexpr size_t kSettingsPacingScrollAlignIndex = 5;
+constexpr size_t kSettingsPacingScrollPreviewIndex = 6;
 constexpr size_t kWifiSettingsNetworkIndex = 1;
 constexpr size_t kWifiSettingsChooseIndex = 2;
 constexpr size_t kWifiSettingsForgetIndex = 3;
@@ -518,6 +528,10 @@ constexpr const char *kPrefTypographyGuideGap = "type_gap";
 constexpr const char *kPrefScrollFontSize = "sc_font";
 constexpr const char *kPrefScrollLineSpacing = "sc_line_sp";
 constexpr const char *kPrefScrollMargin = "sc_margin";
+constexpr const char *kPrefScrollAlign = "sc_align";
+// Scale of sc_font: absent = the table before 2026-10-10 (two steps
+// larger), see loadScrollFontSize().
+constexpr const char *kPrefScrollFontScale = "sc_font_v";
 constexpr const char *kPrefScreensaverTimeout = "scrn_tmo";
 constexpr const char *kPrefScreensaverAutoOff = "scrn_aof";
 constexpr const char *kPrefScreensaverSleepGuard = "scrn_slp";
@@ -614,6 +628,8 @@ constexpr uint16_t kKeyboardMarginX = 8;
 constexpr uint16_t kKeyboardTopY = 48;
 constexpr uint16_t kKeyboardRowGap = 4;
 constexpr uint16_t kKeyboardRowHeight = 27;
+// The "->" confirm key at the right end of the text field.
+constexpr uint16_t kTextEntryConfirmWidth = 72;
 
 void logApp(const char *message) {
   ESP_LOGI(kAppTag, "%s", message);
@@ -996,12 +1012,13 @@ void App::begin() {
   if (readerFontSizeIndex_ >= kReaderFontSizeCount) {
     readerFontSizeIndex_ = 0;
   }
-  scrollFontSize_ = preferences_.getUChar(kPrefScrollFontSize, scrollFontSize_);
-  if (scrollFontSize_ > 8) scrollFontSize_ = 1;
+  loadScrollFontSize();
   scrollLineSpacing_ = preferences_.getUChar(kPrefScrollLineSpacing, scrollLineSpacing_);
   if (scrollLineSpacing_ > 2) scrollLineSpacing_ = 1;
   scrollMargin_ = preferences_.getUChar(kPrefScrollMargin, scrollMargin_);
   if (scrollMargin_ > 2) scrollMargin_ = 1;
+  scrollAlign_ = preferences_.getUChar(kPrefScrollAlign, scrollAlign_);
+  if (scrollAlign_ > DisplayManager::kScrollAlignCenter) scrollAlign_ = DisplayManager::kScrollAlignLeft;
   switch (preferences_.getUChar(kPrefFooterMetricMode,
                                 static_cast<uint8_t>(footerMetricMode_))) {
     case static_cast<uint8_t>(FooterMetricMode::ChapterTime):
@@ -1292,21 +1309,25 @@ void App::update(uint32_t nowMs) {
       return;
     }
 
-    // Short-press power button → exit plugin, return to plugins menu
+    // Short-press power button → leave the plugin with the screen off.
     if (powerButton_.wasReleasedEvent()) {
-      Serial.println("[plugin] power button pressed — unloading plugin");
+      Serial.println("[plugin] power button pressed — unloading plugin, screen off");
       pluginLoader_.unload();
       returnFromPlugin();
+      turnScreenOffFromPower(nowMs);
       return;
     }
 
-    // Forward boot button events to the plugin
+    // Short-press Reboot (BOOT) button → back out of the plugin, the job
+    // the power button had before. Plugins get no button events now: every
+    // action of theirs is reachable by touch.
     if (button_.wasReleasedEvent()) {
-      PluginButtonEvent btnEvent = {};
-      btnEvent.buttonId = 0;  // boot button
-      btnEvent.pressed = true;
-      btnEvent.timestampMs = nowMs;
-      pluginLoader_.forwardButton(btnEvent);
+      if (button_.lastHoldDurationMs() < kThemeToggleHoldMs) {
+        Serial.println("[plugin] reboot button pressed — unloading plugin");
+        pluginLoader_.unload();
+        returnFromPlugin();
+        return;
+      }
     }
 
     // Forward touch events to the plugin (except the header back button of
@@ -1660,7 +1681,8 @@ void App::setState(AppState nextState, uint32_t nowMs) {
   }
   if (state_ == AppState::Playing) {
     playingSinceMs_ = nowMs;
-  } else if (previousState == AppState::Playing && sessionWifiAutoOffMs() > 0) {
+  } else if (previousState == AppState::Playing && sessionWifiAutoOffMs() > 0 &&
+             state_ != AppState::Standby) {
     resumeSessionWifi("reading stopped");
   }
 
@@ -1899,6 +1921,9 @@ bool App::handleStandbyCombo(uint32_t nowMs) {
 }
 
 void App::handleBootButton(uint32_t nowMs) {
+  // The Reboot (BOOT) button: a short press opens the menu, goes back a
+  // screen or a wizard step (what the power button did before). A long
+  // press does nothing for now.
   if (state_ == AppState::Standby) {
     if (!standbyButtonsReleased_ && !button_.isHeld() && !powerButton_.isHeld() &&
         nowMs - standbyEnteredMs_ >= kStandbyWakeGraceMs) {
@@ -1912,7 +1937,6 @@ void App::handleBootButton(uint32_t nowMs) {
   }
 
   if (state_ == AppState::Booting || state_ == AppState::UsbTransfer ||
-      state_ == AppState::CompanionSync ||
       state_ == AppState::Sleeping || powerOffStarted_) {
     return;
   }
@@ -1937,13 +1961,6 @@ void App::handleBootButton(uint32_t nowMs) {
     lastActivityMs_ = nowMs;
   }
 
-  if (button_.isHeld() && !bootButtonLongPressHandled_ &&
-      button_.heldDurationMs(nowMs) >= kThemeToggleHoldMs) {
-    bootButtonLongPressHandled_ = true;
-    cycleThemeMode(nowMs);
-    return;
-  }
-
   if (!button_.wasReleasedEvent()) {
     return;
   }
@@ -1953,18 +1970,48 @@ void App::handleBootButton(uint32_t nowMs) {
     return;
   }
 
-  if (button_.lastHoldDurationMs() < kThemeToggleHoldMs) {
-    // In settings menu with help enabled → show help instead of cycling brightness
-    if (state_ == AppState::Menu && showHelpHints_ && !showingHelpPopup_ &&
-        (menuScreen_ == MenuScreen::SettingsDisplay || menuScreen_ == MenuScreen::SettingsPacing)) {
-      showHelpForCurrentItem();
-      if (showingHelpPopup_) return;  // help was shown, don't cycle brightness
-    }
-    cycleBrightness();
+  if (button_.lastHoldDurationMs() >= kThemeToggleHoldMs) {
+    // Long press: no function yet.
+    return;
+  }
+
+  if (state_ == AppState::CompanionSync) {
+    // Back out of the phone-sync screen.
+    exitCompanionSync(nowMs);
+    return;
+  }
+
+  runMenuButton(nowMs);
+}
+
+void App::runMenuButton(uint32_t nowMs) {
+  // Single tap always acts immediately — no waiting to see if a second tap
+  // follows. Double-tap-to-restart is instead detected retroactively: if a
+  // tap opened the menu and a second tap lands within the window while
+  // still on that freshly-opened Main screen (i.e. nothing else navigated
+  // in the meantime), treat it as "restart" instead of the normal in-menu
+  // tap action (back / triple-tap-for-savepoint tracking).
+  if (state_ == AppState::Menu && menuScreen_ == MenuScreen::Main && powerTapPending_ &&
+      nowMs - powerTapPendingMs_ <= kPowerDoubleTapWindowMs) {
+    powerTapPending_ = false;
+    pwrTapCount_ = 0;
+    restartFromPowerButtonDoubleTap();
+    return;
+  }
+
+  const bool openingMenuFromReadingScreen = (state_ != AppState::Menu);
+  powerTapPending_ = false;
+  toggleMenuFromPowerButton(nowMs);
+  if (openingMenuFromReadingScreen) {
+    powerTapPending_ = true;
+    powerTapPendingMs_ = nowMs;
   }
 }
 
 void App::handlePowerButton(uint32_t nowMs) {
+  // The power button: a short press turns the screen off (and stops
+  // reading and the phone network), another short press turns it back on.
+  // Holding it powers the reader off.
   if (!powerButtonReleasedSinceBoot_) {
     if (!powerButton_.isHeld()) {
       powerButtonReleasedSinceBoot_ = true;
@@ -1978,13 +2025,30 @@ void App::handlePowerButton(uint32_t nowMs) {
       standbyButtonsReleased_ = true;
     }
     if (standbyButtonsReleased_ && powerButton_.wasPressedEvent()) {
-      powerButtonLongPressHandled_ = true;
+      // The press that lights the screen: its release must not darken it
+      // again, but holding on still powers the reader off.
+      powerButtonLongPressHandled_ = false;
+      powerWakeReleaseIgnored_ = true;
       exitStandby(nowMs);
     }
     return;
   }
 
-  if (state_ == AppState::UsbTransfer || state_ == AppState::CompanionSync || powerOffStarted_) {
+  if (state_ == AppState::UsbTransfer || powerOffStarted_) {
+    return;
+  }
+
+  if (state_ == AppState::CompanionSync) {
+    // Holding PWR here leaves sync (updateCompanionSync); a short press
+    // ends the sharing and darkens the screen.
+    if (powerButton_.wasReleasedEvent()) {
+      const bool shortPress = !powerButtonLongPressHandled_ && powerButton_.lastHoldDurationMs() < kPowerOffHoldMs;
+      powerButtonLongPressHandled_ = false;
+      if (shortPress) {
+        exitCompanionSync(nowMs);
+        turnScreenOffFromPower(nowMs);
+      }
+    }
     return;
   }
 
@@ -2013,27 +2077,13 @@ void App::handlePowerButton(uint32_t nowMs) {
     return;
   }
 
-  // Single tap always acts immediately — no waiting to see if a second tap
-  // follows. Double-tap-to-restart is instead detected retroactively: if a
-  // tap opened the menu and a second PWR tap lands within the window while
-  // still on that freshly-opened Main screen (i.e. nothing else navigated
-  // in the meantime), treat it as "restart" instead of the normal in-menu
-  // tap action (back / triple-tap-for-savepoint tracking).
-  if (state_ == AppState::Menu && menuScreen_ == MenuScreen::Main && powerTapPending_ &&
-      nowMs - powerTapPendingMs_ <= kPowerDoubleTapWindowMs) {
-    powerTapPending_ = false;
-    pwrTapCount_ = 0;
-    restartFromPowerButtonDoubleTap();
+  if (powerWakeReleaseIgnored_) {
+    powerWakeReleaseIgnored_ = false;
     return;
   }
 
-  const bool openingMenuFromReadingScreen = (state_ != AppState::Menu);
   powerTapPending_ = false;
-  toggleMenuFromPowerButton(nowMs);
-  if (openingMenuFromReadingScreen) {
-    powerTapPending_ = true;
-    powerTapPendingMs_ = nowMs;
-  }
+  turnScreenOffFromPower(nowMs);
 }
 
 void App::restartFromPowerButtonDoubleTap() {
@@ -2170,6 +2220,7 @@ void App::applyDisplayPreferences(uint32_t nowMs, bool rerender) {
   display_.setScrollFontSize(scrollFontSize_);
   display_.setScrollLineSpacing(scrollLineSpacing_);
   display_.setScrollMargin(scrollMargin_);
+  display_.setScrollAlign(scrollAlign_);
 
   if (!rerender) {
     return;
@@ -2262,12 +2313,13 @@ void App::reloadRuntimePreferences(uint32_t nowMs, bool rerender) {
   if (readerFontSizeIndex_ >= kReaderFontSizeCount) {
     readerFontSizeIndex_ = 0;
   }
-  scrollFontSize_ = preferences_.getUChar(kPrefScrollFontSize, scrollFontSize_);
-  if (scrollFontSize_ > 8) scrollFontSize_ = 1;
+  loadScrollFontSize();
   scrollLineSpacing_ = preferences_.getUChar(kPrefScrollLineSpacing, scrollLineSpacing_);
   if (scrollLineSpacing_ > 2) scrollLineSpacing_ = 1;
   scrollMargin_ = preferences_.getUChar(kPrefScrollMargin, scrollMargin_);
   if (scrollMargin_ > 2) scrollMargin_ = 1;
+  scrollAlign_ = preferences_.getUChar(kPrefScrollAlign, scrollAlign_);
+  if (scrollAlign_ > DisplayManager::kScrollAlignCenter) scrollAlign_ = DisplayManager::kScrollAlignLeft;
 
   switch (preferences_.getUChar(kPrefFooterMetricMode,
                                 static_cast<uint8_t>(footerMetricMode_))) {
@@ -3066,8 +3118,7 @@ void App::handleTouch(uint32_t nowMs) {
   if (state_ == AppState::Standby) {
     TouchEvent ev;
     if (touch_.poll(ev)) {
-      // Ignore touch during standby — only physical buttons wake the device
-      // to prevent accidental wake in pocket
+      handleStandbyTouch(ev, nowMs);
     }
     return;
   }
@@ -5390,6 +5441,15 @@ void App::selectSettingsItem(uint32_t nowMs) {
         showGridToast(settingsMenuItems_[settingsSelectedIndex_], nowMs);
         renderSettings();
         return;
+      case kSettingsPacingScrollAlignIndex:
+        scrollAlign_ = static_cast<uint8_t>((scrollAlign_ + 1) % 3);
+        preferences_.putUChar(kPrefScrollAlign, scrollAlign_);
+        display_.setScrollAlign(scrollAlign_);
+        Serial.printf("[settings] scroll align=%s\n", scrollAlignLabel().c_str());
+        rebuildSettingsMenuItems();
+        showGridToast(settingsMenuItems_[settingsSelectedIndex_], nowMs);
+        renderSettings();
+        return;
       case kSettingsPacingScrollPreviewIndex:
         showScrollSettingsPreview();
         return;
@@ -5737,7 +5797,8 @@ void App::openTextEntry(TextEntryPurpose purpose, const String &title, const Str
   textEntrySession_.contextValue = contextValue;
   textEntrySession_.maxLength = maxLength;
   textEntrySession_.masked = masked;
-  textEntrySession_.revealValue = false;
+  // Passwords show as typed; "ukryj" masks them on request.
+  textEntrySession_.revealValue = true;
   menuScreen_ = MenuScreen::TextEntry;
   textEntryOpenedAtMs_ = millis();
   lastFiredTextEntryButtonIndex_ = -1;
@@ -5792,6 +5853,7 @@ void App::rebuildTextEntryButtons() {
   };
 
   const bool revealActive = textEntrySession_.masked && textEntrySession_.revealValue;
+  const bool hiddenActive = textEntrySession_.masked && !textEntrySession_.revealValue;
   const ControlButtonDef controls[] = {
       {"abc", TextEntryAction::SetLower, 11, false,
        textEntrySession_.mode == KeyboardMode::Lower},
@@ -5803,8 +5865,7 @@ void App::rebuildTextEntryButtons() {
       {trs(TrStatus::KeyBack), TextEntryAction::Backspace, 13, false, false},
       {trs(textEntrySession_.masked ? (revealActive ? TrStatus::KeyHide : TrStatus::KeyShow) : TrStatus::KeyClear),
        textEntrySession_.masked ? TextEntryAction::ToggleMask : TextEntryAction::Clear, 13, false,
-       revealActive},
-      {trs(TrStatus::KeySave), TextEntryAction::Save, 12, true, false},
+       hiddenActive},
       {trs(TrStatus::KeyCancel), TextEntryAction::Cancel, 14, false, false},
   };
 
@@ -5841,6 +5902,18 @@ void App::rebuildTextEntryButtons() {
 
     x = static_cast<uint16_t>(x + button.view.width + kKeyboardRowGap);
   }
+
+  // Confirm sits at the right end of the input field, where the eye already
+  // is after typing (DisplayManager::renderTextEntry shortens the field).
+  TextEntryButton confirm;
+  confirm.view.label = "->";
+  confirm.view.width = kTextEntryConfirmWidth;
+  confirm.view.height = kKeyboardTopY - 8;
+  confirm.view.x = static_cast<uint16_t>(BoardConfig::DISPLAY_WIDTH - kKeyboardMarginX - confirm.view.width);
+  confirm.view.y = 3;
+  confirm.view.accent = true;
+  confirm.action = TextEntryAction::Save;
+  textEntryButtons_.push_back(confirm);
 }
 
 void App::renderTextEntry() {
@@ -6174,6 +6247,10 @@ void App::selectTypographyTuningItem(uint32_t nowMs) {
     case TypographyTuningReset:
       openTypographyResetConfirm();
       return;
+    case TypographyTuningGuideSide:
+      cycleHandednessMode(nowMs);
+      renderMenu();
+      return;
     default:
       return;
   }
@@ -6429,7 +6506,7 @@ void App::rebuildSettingsMenuItems() {
     settingsMenuItems_.push_back(String(uiText(UiText::Theme)) + ": " + themeModeLabel());
     settingsMenuItems_.push_back(uiText(UiText::Brightness) + ": " +
                                  String(brightnessPercentSetting_) + "%");
-    settingsMenuItems_.push_back(String(tr(TrKey::ReaderHand)) + handednessLabel());
+    settingsMenuItems_.push_back(String(tr4(TrKey4::GuideSideColon)) + handednessLabel());
     settingsMenuItems_.push_back(String(tr4(TrKey4::BatteryStyleColon)) + batteryStyleLabel());
     settingsMenuItems_.push_back(String(tr(TrKey::FooterLabel)) +
                                  footerMetricModeLabel());
@@ -6468,6 +6545,7 @@ void App::rebuildSettingsMenuItems() {
       settingsMenuItems_.push_back(uiText(UiText::FontSize) + ": " + scrollFontSizeLabel());
       settingsMenuItems_.push_back(uiText(UiText::ScrollLineSpacing) + ": " + scrollLineSpacingLabel());
       settingsMenuItems_.push_back(uiText(UiText::ScrollMargins) + ": " + scrollMarginLabel());
+      settingsMenuItems_.push_back(String(tr4(TrKey4::ScrollAlignColon)) + scrollAlignLabel());
       settingsMenuItems_.push_back(String(trs(TrStatus::Preview)));
     } else {
       settingsMenuItems_.push_back(String(tr(TrKey::PauseBehaviour)) +
@@ -6970,19 +7048,29 @@ void App::selectWelcomeLanguageItem(uint32_t nowMs) {
     // The card may have gone in after boot.
     storageReady_ = storage_.begin();
   }
-  if (!storageReady_) {
+  if (!storageReady_ || welcomeOwnCardPending()) {
     openWelcomeSdCard(nowMs);
     return;
   }
-  openWelcomeTheme();
+  openWelcomeWifi();
+}
+
+bool App::welcomeOwnCardPending() {
+  // A card from the flasher carries the whole font pack; any other card
+  // gets the question once (format, or keep the files and download).
+  return storageReady_ && !welcomeOwnCardDecided_ && !refreshFontPackComplete();
 }
 
 void App::openWelcomeSdCard(uint32_t nowMs) {
   menuScreen_ = MenuScreen::WelcomeSdCard;
   welcomeScreenEnteredMs_ = nowMs;
-  welcomeSdState_ = storage_.probeCard() == StorageManager::CardProbe::Missing
-                        ? WelcomeSdState::Missing
-                        : WelcomeSdState::Unreadable;
+  if (storageReady_) {
+    welcomeSdState_ = WelcomeSdState::OwnCard;
+  } else {
+    welcomeSdState_ = storage_.probeCard() == StorageManager::CardProbe::Missing
+                          ? WelcomeSdState::Missing
+                          : WelcomeSdState::Unreadable;
+  }
   renderWizardPage();
 }
 
@@ -6992,13 +7080,18 @@ void App::selectWelcomeSdCardNext(uint32_t nowMs) {
       storageReady_ = storage_.begin();
       if (storageReady_) {
         applyTypographySettings(nowMs, false);
-        openWelcomeTheme();
+        if (welcomeOwnCardPending()) {
+          openWelcomeSdCard(nowMs);
+          return;
+        }
+        openWelcomeWifi();
         return;
       }
       openWelcomeSdCard(nowMs);
       return;
     case WelcomeSdState::Unreadable:
     case WelcomeSdState::Failed:
+    case WelcomeSdState::OwnCard:
       welcomeSdState_ = WelcomeSdState::ConfirmFormat;
       renderWizardPage();
       return;
@@ -7007,7 +7100,8 @@ void App::selectWelcomeSdCardNext(uint32_t nowMs) {
       renderWizardPage();
       storageReady_ = storage_.formatCard();
       if (storageReady_) {
-        openWelcomeTheme();
+        welcomeOwnCardDecided_ = true;
+        openWelcomeWifi();
         return;
       }
       welcomeSdState_ = WelcomeSdState::Failed;
@@ -7031,7 +7125,7 @@ void App::selectWelcomeThemeItem(uint32_t nowMs) {
   previewWizardPickerSelection(nowMs);
   Serial.printf("[welcome] theme dark=%d night=%d\n",
                 static_cast<int>(darkMode_), static_cast<int>(nightMode_));
-  openWelcomeHighlightColor();
+  openWelcomeMenuFont(nowMs);
 }
 
 void App::openWelcomeHighlightColor() {
@@ -7046,7 +7140,7 @@ void App::selectWelcomeHighlightColorItem(uint32_t nowMs) {
   previewWizardPickerSelection(nowMs);
   Serial.printf("[welcome] highlight color=%u\n",
                 static_cast<unsigned>(settingsSelectedIndex_));
-  openWelcomeWifi();
+  openWelcomeConnect(nowMs);
 }
 
 // ─── Krok 4: Wi-Fi domowe ────────────────────────────────────────────────────
@@ -7068,6 +7162,13 @@ void App::openWelcomeWifi() {
 void App::returnFromWifiFlow(uint32_t nowMs) {
   if (wifiFlowFromWizard_) {
     wifiFlowFromWizard_ = false;
+    if (welcomeAssetsLang_ == static_cast<uint8_t>(uiLanguage_)) {
+      // Back here from a later step: the books of this language are on the
+      // card already, nothing to download again.
+      Serial.println("[welcome] assets already loaded for this language, loading step skipped");
+      openWelcomeMenuTheme(nowMs);
+      return;
+    }
     openWelcomeLoading(nowMs);
     return;
   }
@@ -7103,6 +7204,8 @@ void App::renderWelcomeLoading(uint32_t nowMs) {
 // Auto-advance po 3s, bez potrzeby dotyku — patrz updateWelcomeTimedScreens().
 
 void App::openWelcomeSuper(uint32_t nowMs) {
+  // Reached only when the loading step ends.
+  welcomeAssetsLang_ = static_cast<uint8_t>(uiLanguage_);
   menuScreen_ = MenuScreen::WelcomeSuper;
   welcomeScreenEnteredMs_ = nowMs;
   renderWelcomeTimedMessage(tr3(TrKey3::WelcomeSuperTitle));
@@ -7164,7 +7267,8 @@ void App::updateWelcomeTimedScreens(uint32_t nowMs) {
     return;
   }
   if (menuScreen_ == MenuScreen::WelcomeSuper) {
-    openWelcomeConfigureIntro(nowMs);
+    // The Super page carries the set-up line itself: on to the menu look.
+    openWelcomeMenuTheme(nowMs);
   } else if (menuScreen_ == MenuScreen::WelcomeConfigureIntro) {
     openWelcomeMenuTheme(nowMs);
   } else {
@@ -7194,13 +7298,13 @@ void App::selectWelcomeReadingModeItem(uint32_t nowMs) {
       readerMode_ = ReaderMode::Rsvp;
       preferences_.putUChar(kPrefReaderMode, static_cast<uint8_t>(readerMode_));
       Serial.println("[welcome] reading mode=RSVP");
-      openWelcomeConnect(nowMs);
+      openWelcomeHighlightColor();
       return;
     case 1:  // Przewijanie strony
       readerMode_ = ReaderMode::Scroll;
       preferences_.putUChar(kPrefReaderMode, static_cast<uint8_t>(readerMode_));
       Serial.println("[welcome] reading mode=Scroll");
-      openWelcomeConnect(nowMs);
+      openWelcomeHighlightColor();
       return;
     default:
       return;
@@ -7222,7 +7326,22 @@ void App::openWelcomeReadingModePreview(uint8_t mode) {
   welcomeReadingModePreviewLastTickMs_ = millis();
   menuScreen_ = MenuScreen::WelcomeReadingModePreview;
 
-  if (mode == 1) {
+  if (mode == 0) {
+    // A sentence in the menu language, word by word.
+    welcomeRsvpPreviewWords_.clear();
+    const String sentence = tr4(TrKey4::WizRsvpSample);
+    int start = 0;
+    while (start < static_cast<int>(sentence.length())) {
+      int spaceIndex = sentence.indexOf(' ', start);
+      if (spaceIndex < 0) {
+        spaceIndex = sentence.length();
+      }
+      if (spaceIndex > start) {
+        welcomeRsvpPreviewWords_.push_back(sentence.substring(start, spaceIndex));
+      }
+      start = spaceIndex + 1;
+    }
+  } else {
     // Zbuduj listę słów raz przy otwarciu — to samo zdanie powtórzone kilka
     // razy jako kolejne akapity, żeby renderScrollView() miało realny,
     // wielowierszowy tekst do przewijania zamiast jednego zdania na sztywno.
@@ -7264,9 +7383,9 @@ void App::updateWelcomeReadingModePreview(uint32_t nowMs) {
   welcomeReadingModePreviewLastTickMs_ = nowMs;
 
   if (welcomeReadingModePreviewMode_ == 0) {
-    if (kTypographyPreviewWordCount > 0) {
+    if (!welcomeRsvpPreviewWords_.empty()) {
       welcomeReadingModePreviewWordIndex_ =
-          (welcomeReadingModePreviewWordIndex_ + 1) % kTypographyPreviewWordCount;
+          (welcomeReadingModePreviewWordIndex_ + 1) % welcomeRsvpPreviewWords_.size();
     }
   } else if (!welcomeScrollPreviewWords_.empty()) {
     welcomeReadingModePreviewWordIndex_ =
@@ -7392,34 +7511,31 @@ void App::wizardStepBack(uint32_t nowMs) {
         openWelcomeLanguage();
       }
       return;
-    case MenuScreen::WelcomeTheme:
-      openWelcomeLanguage();
-      return;
-    case MenuScreen::WelcomeHighlightColor:
-      openWelcomeTheme();
-      return;
     case MenuScreen::WifiNetworks:
       if (wifiFlowFromWizard_) {
         wifiFlowFromWizard_ = false;
-        openWelcomeHighlightColor();
+        openWelcomeLanguage();
       }
       return;
     case MenuScreen::WelcomeLoading:
       // Only before anything is downloading or installing.
       if (welcomeLoadPhase_ == WelcomeLoadPhase::Start) {
-        openWelcomeHighlightColor();
+        openWelcomeWifi();
       }
       return;
     case MenuScreen::WelcomeSuper:
     case MenuScreen::WelcomeConfigureIntro:
       return;
     case MenuScreen::WelcomeMenuTheme:
-      // Back over the downloads to the last choice before them; Dalej from
-      // there runs Wi-Fi and loading again (quick, nothing left to fetch).
-      openWelcomeHighlightColor();
+      // Back over the downloads to the network list; Dalej from there skips
+      // the loading step while the language stays the same.
+      openWelcomeWifi();
+      return;
+    case MenuScreen::WelcomeTheme:
+      openWelcomeMenuTheme(nowMs);
       return;
     case MenuScreen::WelcomeMenuFont:
-      openWelcomeMenuTheme(nowMs);
+      openWelcomeTheme();
       return;
     case MenuScreen::WelcomeFont:
       openWelcomeMenuFont(nowMs);
@@ -7435,8 +7551,11 @@ void App::wizardStepBack(uint32_t nowMs) {
       }
       openWelcomeReadingMode();
       return;
-    case MenuScreen::WelcomeConnect:
+    case MenuScreen::WelcomeHighlightColor:
       openWelcomeReadingMode();
+      return;
+    case MenuScreen::WelcomeConnect:
+      openWelcomeHighlightColor();
       return;
     case MenuScreen::WelcomeAppPairing:
       openWelcomeConnect(nowMs);
@@ -8791,6 +8910,31 @@ String App::scrollLineSpacingLabel() const {
   return String(trs(labels[idx]));
 }
 
+String App::scrollAlignLabel() const {
+  switch (scrollAlign_) {
+    case DisplayManager::kScrollAlignJustify:
+      return tr4(TrKey4::AlignJustify);
+    case DisplayManager::kScrollAlignCenter:
+      return tr4(TrKey4::AlignCenter);
+    default:
+      return tr4(TrKey4::AlignLeft);
+  }
+}
+
+void App::loadScrollFontSize() {
+  scrollFontSize_ = preferences_.getUChar(kPrefScrollFontSize, scrollFontSize_);
+  if (!preferences_.isKey(kPrefScrollFontScale)) {
+    // Saved on the old table: the same text size is two levels up now
+    // (the two largest are gone, so those land on the new largest).
+    if (preferences_.isKey(kPrefScrollFontSize)) {
+      scrollFontSize_ = static_cast<uint8_t>(std::min(8, scrollFontSize_ + 2));
+      preferences_.putUChar(kPrefScrollFontSize, scrollFontSize_);
+    }
+    preferences_.putUChar(kPrefScrollFontScale, 2);
+  }
+  if (scrollFontSize_ > 8) scrollFontSize_ = 3;
+}
+
 String App::scrollMarginLabel() const {
   static const TrStatus labels[] = {TrStatus::MarginNarrow, TrStatus::SpacingNormal, TrStatus::MarginWide};
   const uint8_t idx = scrollMargin_ <= 2 ? scrollMargin_ : 1;
@@ -8803,8 +8947,20 @@ String App::pauseModeLabel() const {
 }
 
 String App::handednessLabel() const {
-  return handednessMode_ == HandednessMode::Left ? tr(TrKey::LeftHand)
-                                                 : tr(TrKey::RightHand);
+  // Named after where the guide stands: the right-hand layout keeps it left
+  // of the middle, the left-hand one moves it right.
+  return handednessMode_ == HandednessMode::Left ? tr(TrKey::RightHand) : tr(TrKey::LeftHand);
+}
+
+String App::guideSideTitle() const {
+  // "Prowadnica: " without the colon.
+  String title = tr4(TrKey4::GuideSideColon);
+  title.trim();
+  if (title.endsWith(":")) {
+    title.remove(title.length() - 1);
+    title.trim();
+  }
+  return title;
 }
 
 String App::savePointNameModeLabel() const {
@@ -8913,6 +9069,8 @@ String App::typographyTuningLabel() const {
       return uiText(UiText::GuideGap);
     case TypographyTuningReset:
       return uiText(UiText::Reset);
+    case TypographyTuningGuideSide:
+      return guideSideTitle();
     default:
       return uiText(UiText::Typography);
   }
@@ -8941,6 +9099,8 @@ String App::typographyTuningValueLabel() const {
       return String(static_cast<unsigned int>(typographyConfig_.guideGap)) + " px";
     case TypographyTuningReset:
       return uiText(UiText::TapToReset);
+    case TypographyTuningGuideSide:
+      return handednessLabel();
     default:
       return "";
   }
@@ -10616,10 +10776,19 @@ void App::exitUsbTransfer(uint32_t nowMs) {
   setState(AppState::Paused, nowMs);
 }
 
-void App::enterStandby(uint32_t nowMs) {
+void App::enterStandby(uint32_t nowMs, bool screenOff) {
   if (state_ == AppState::UsbTransfer || state_ == AppState::CompanionSync ||
       state_ == AppState::Sleeping || powerOffStarted_) {
     return;
+  }
+  standbyPhase_ = screenOff ? StandbyPhase::Off : StandbyPhase::Dim;
+  standbyPhaseMs_ = nowMs;
+  standbyLastTapMs_ = 0;
+  standbyTouchDown_ = false;
+  standbyAskPressed_ = -1;
+  standbyAskShownSeconds_ = -1;
+  if (screenOff) {
+    stopActivityForScreenOff();
   }
 
   standbyReturnState_ = state_ == AppState::Playing ? AppState::Paused : state_;
@@ -10671,10 +10840,28 @@ void App::exitStandby(uint32_t nowMs) {
     display_.wakeFromSleep();
     standbyScreenOffActive_ = false;
   }
+  // The dim phase turned the backlight almost off.
+  display_.setBrightnessPercent(currentBrightnessPercent());
+  standbyPhase_ = StandbyPhase::Dim;
   setState(nextState, nowMs);
+  if (standbyStoppedWifi_) {
+    standbyStoppedWifi_ = false;
+    // "Whole session" and automatic modes keep the phone network up while
+    // the screen is on.
+    if (wifiSessionMode_ != kWifiSessionStandard) {
+      resumeSessionWifi("screen on");
+    }
+  }
 }
 
 void App::seedStandbyScreensaver(uint32_t nowMs) {
+  if (standbyPhase_ == StandbyPhase::Off) {
+    seedStandbyScreenOff(nowMs);
+    return;
+  }
+  if (standbyPhase_ == StandbyPhase::Dim) {
+    display_.setBrightnessPercent(kStandbyDimPercent);
+  }
   if (screensaverMode_ != ScreensaverMode::ScreenOff && standbyScreenOffActive_) {
     display_.wakeFromSleep();
     standbyScreenOffActive_ = false;
@@ -10693,7 +10880,8 @@ void App::seedStandbyScreensaver(uint32_t nowMs) {
       seedStandbyScene(nowMs);
       return;
     case ScreensaverMode::ScreenOff:
-      seedStandbyScreenOff(nowMs);
+      // Dim phase of the "screen off" style: the last screen stays up with
+      // the backlight low (updateStandbyScreensaver draws nothing).
       return;
     case ScreensaverMode::Life:
     default:
@@ -11164,10 +11352,43 @@ void App::updateStandbyScreensaver(uint32_t nowMs, bool force) {
     }
   }
 
+  switch (standbyPhase_) {
+    case StandbyPhase::Off:
+      if (!standbyScreenOffActive_) {
+        seedStandbyScreenOff(nowMs);
+      }
+      lastStandbyFrameMs_ = nowMs;
+      return;
+    case StandbyPhase::Ask:
+      if (nowMs - standbyPhaseMs_ >= kStandbyAskMs) {
+        Serial.println("[app] screensaver: no answer, screen off");
+        standbyPhase_ = StandbyPhase::Off;
+        standbyPhaseMs_ = nowMs;
+        stopActivityForScreenOff();
+        seedStandbyScreenOff(nowMs);
+        return;
+      }
+      renderStandbyAsk(nowMs);
+      return;
+    case StandbyPhase::Dim:
+      if (nowMs - standbyPhaseMs_ >= kStandbyDimMs) {
+        Serial.println("[app] screensaver: asking before the screen goes off");
+        standbyPhase_ = StandbyPhase::Ask;
+        standbyPhaseMs_ = nowMs;
+        standbyAskShownSeconds_ = -1;
+        if (standbyScreenOffActive_) {
+          display_.wakeFromSleep();
+          standbyScreenOffActive_ = false;
+        }
+        display_.setBrightnessPercent(currentBrightnessPercent());
+        renderStandbyAsk(nowMs);
+        return;
+      }
+      break;
+  }
+
   if (screensaverMode_ == ScreensaverMode::ScreenOff) {
-    if (!standbyScreenOffActive_) {
-      seedStandbyScreenOff(nowMs);
-    }
+    // No picture while dim: the last screen stays, the backlight low.
     lastStandbyFrameMs_ = nowMs;
     return;
   }
@@ -12981,3 +13202,4 @@ void App::handleStorageStatus(void *context, const char *title, const char *line
 #include "AppTutorial.inl"
 #include "AppWizard.inl"
 #include "AppSdSetup.inl"
+#include "AppProvision.inl"

@@ -353,10 +353,9 @@ struct ReaderPanelView {
   std::vector<DisplayManager::ContextWord> words;
   size_t currentLocal = 0;
   int menuId = kNoTarget;
-  int rewindId = kNoTarget;   // back to the start of the sentence
+  int rewindId = kNoTarget;   // back to the start of the sentence (left of the word)
   int lookId = kNoTarget;     // Wyglad czytania (reading colors, typeface)
-  int gotoId = kNoTarget;     // jump to %, page or chapter
-  int statusId = kNoTarget;   // the top line + progress bar (also opens "go to")
+  int statusId = kNoTarget;   // the top line: opens "go to" (%, page, chapter)
   int bookmarkId = kNoTarget;
   bool bookmarkFilled = false;
   int minusId = kNoTarget;
@@ -371,6 +370,7 @@ struct ReaderPanelView {
 Rect readerPanelWordArea();
 Rect readerPanelBar();
 Rect readerPanelStatusArea();
+Rect readerPanelRewindRect();
 void paintReaderPanel(DisplayManager &d, Sink &sink, const ReaderPanelView &view);
 
 // ── Przejdz do (jump to %, page or chapter) ──

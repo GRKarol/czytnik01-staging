@@ -336,7 +336,7 @@ void runScreens(DisplayManager &d, void (*dump)(const DisplayManager &, const ch
       v.word = pl("przeczyta~l");
       v.after = pl("ksi~a~zk~e");
       v.menuId = 180;
-      v.gotoId = 187;
+      // go to: the status line (statusId)
       v.statusId = 187;
       v.rewindId = 188;
       v.lookId = 189;
@@ -410,6 +410,8 @@ void runScreens(DisplayManager &d, void (*dump)(const DisplayManager &, const ch
             nb.on = true;
             v.items.push_back(nb);
           } else {
+            ListItem side = item(ListItem::Kind::Setting, 234, "Strona", "Lewa");
+            v.items.push_back(side);
             ListItem pos = item(ListItem::Kind::Slider, 230, pl("Pozycja s~lowa"), "35%");
             pos.sliderMin = 20;
             pos.sliderMax = 60;
@@ -423,7 +425,7 @@ void runScreens(DisplayManager &d, void (*dump)(const DisplayManager &, const ch
             ListItem gap = item(ListItem::Kind::Slider, 232, "Przerwa w linii", "0 px");
             gap.sliderMax = 10;
             v.items.push_back(gap);
-            ListItem reset = item(ListItem::Kind::Button, 233, pl("Domy~s~lne"), "");
+            ListItem reset = item(ListItem::Kind::Button, 233, "", "");
             reset.icon = Icon::Restart;
             v.items.push_back(reset);
           }

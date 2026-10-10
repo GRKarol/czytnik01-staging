@@ -134,6 +134,7 @@ bool usbHostHasPortOpen() {
 //   ls <dir>    files with sizes
 //   wt <KB>     write a test file in 4 KB chunks, read it back, delete it
 //   boot        the last 8 boots (traceBoot)
+//   prov ...    card set-up from the web flasher (app/AppProvision.inl)
 void listCardDir(const String &path) {
   File dir = SD_MMC.open(path);
   if (!dir || !dir.isDirectory()) {
@@ -214,6 +215,8 @@ void pollSerialConsole() {
       writeTestCard(kilobytes > 0 ? static_cast<uint32_t>(kilobytes) : 256U);
     } else if (line == "boot") {
       printBootHistory();
+    } else if (line.startsWith("prov")) {
+      app.handleProvisionCommand(line);
     } else if (!line.isEmpty()) {
       Serial.printf("[con] unknown: %s (df, ls <dir>, wt <KB>, boot)\n", line.c_str());
     }
@@ -239,6 +242,9 @@ void setup() {
   pinMode(BoardConfig::PIN_LCD_BACKLIGHT, OUTPUT);
   digitalWrite(BoardConfig::PIN_LCD_BACKLIGHT, HIGH);
 
+  // The web flasher sends the font pack in 8 KB chunks (AppProvision.inl):
+  // a whole chunk has to fit, or the USB driver drops what doesn't.
+  Serial.setRxBufferSize(16384);
   Serial.begin(115200);
   esp_log_level_set("*", ESP_LOG_INFO);
   const bool pwrButtonHeld = BoardConfig::begin();
