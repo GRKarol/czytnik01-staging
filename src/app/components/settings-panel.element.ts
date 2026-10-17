@@ -13,6 +13,7 @@ import {
   type WifiStationConfig,
 } from "../device/api";
 import { HttpDeviceApi } from "../device/http-api";
+import { hasSnapshot, snapshotTimeLabel } from "../device/snapshot";
 import { APP_VERSION } from "../../shared/config";
 import { setSoftColors, softColors } from "../ui/reader-look";
 import { LANG_NAMES, SUPPORTED_LANGS, chooseLang, chosenLang, tr, type SupportedLang } from "../i18n/index";
@@ -23,6 +24,7 @@ import "./help-panel.element";
 import "./updates-panel.element";
 
 type Page = "root" | "reading" | "look" | "display" | "menu" | "power" | "connect" | "updates" | "language" | "help" | "about";
+const READER_PAGES: Page[] = ["reading", "look", "display", "menu", "power", "connect"];
 
 /**
  * Więcej: the reader's settings as category pages, like the reader's own
@@ -88,13 +90,21 @@ export class SettingsPanel extends LitElement {
     if (!this.settings) return html`<p class="muted">${tr("set.loading")}</p>`;
     const body = this.renderPage(this.settings);
     if (this.page === "root") return body;
+    // Without a reader its pages show the last state it was seen in and
+    // nothing can be changed; the app's own pages stay usable.
+    const locked = !this.onReader && READER_PAGES.includes(this.page);
     return html`
       <button class="back" @click=${() => this.go("root")}>${icons.chevronLeft()} ${tr("nav.more")}</button>
       <h2 class="page-title">${this.pageTitle(this.page)}</h2>
+      ${locked ? html`<p class="notice">${this.offlineNote()}</p>` : nothing}
       ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
-      ${body}
+      ${locked ? html`<div class="locked" inert>${body}</div>` : body}
       ${this.saving ? html`<p class="muted small saving">${tr("common.saving")}</p>` : nothing}
     `;
+  }
+
+  private offlineNote(): string {
+    return hasSnapshot() ? tr("set.offline", { time: snapshotTimeLabel() }) : tr("set.offline.none");
   }
 
   private go(page: Page): void {
@@ -157,7 +167,7 @@ export class SettingsPanel extends LitElement {
       </button>
     `;
     return html`
-      ${!this.onReader ? html`<p class="notice">${tr("set.sample")}</p>` : nothing}
+      ${!this.onReader ? html`<p class="notice">${this.offlineNote()}</p>` : nothing}
       ${this.onReader && !s.device ? html`<p class="notice">${tr("set.needsUpdate")}</p>` : nothing}
       ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
       <span class="section-title">${tr("set.group.reader")}</span>
@@ -762,6 +772,13 @@ export class SettingsPanel extends LitElement {
         display: flex;
         flex-direction: column;
         gap: 12px;
+      }
+      .locked {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        opacity: 0.6;
+        pointer-events: none;
       }
       .back {
         align-self: flex-start;

@@ -499,6 +499,8 @@ enum class TrKey4 : uint8_t {
   GuideSideShort,
   PacingSentences,
   WifiScreenOffColon,
+  BookOptions,
+  ColorPink,
 };
 
 namespace Translations3 {

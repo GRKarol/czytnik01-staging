@@ -578,8 +578,9 @@ void App::renderNanoRead() {
   savePoints.id = kNanoActionBase + kNanoReadSavePoints;
   savePoints.label = uiText(UiText::SavePoints);
   savePoints.icon = NanoIcon::Bookmark;
-  if (!savePoints_.empty()) {
-    savePoints.detail = String(static_cast<unsigned>(savePoints_.size()));
+  const size_t bookSavePoints = savePointCountForCurrentBook();
+  if (bookSavePoints > 0) {
+    savePoints.detail = String(static_cast<unsigned>(bookSavePoints));
   }
   nano::Tile library;
   library.id = kNanoActionBase + kNanoReadLibrary;
@@ -1223,6 +1224,9 @@ void App::renderNanoShelf() {
   view.header.pillLabel = librarySortLabel();
   view.header.pillIcon = NanoIcon::Sort;
   view.emptyLabel = tr3(TrKey3::NanoNoLibraryItems);
+  view.readLabel = uiText(UiText::Read);
+  view.optionsLabel = tr4(TrKey4::BookOptions);
+  view.pressedId = nanoShelfPressedId_;
 
   NanoSinkAdapter sink(*this);
   sink.zeroIsBack = true;
@@ -1340,7 +1344,7 @@ void App::renderNanoSavePoints() {
     item.id = static_cast<int>(nameIndex);
     item.label = savePointMenuItems_[nameIndex];
     item.icon = NanoIcon::Bookmark;
-    const size_t pointIndex = row - 1;
+    const size_t pointIndex = row - 1 < savePointRows_.size() ? savePointRows_[row - 1] : savePoints_.size();
     if (pointIndex < savePoints_.size()) {
       item.value = String(static_cast<unsigned>(savePoints_[pointIndex].progressPercent)) + "%";
     }
@@ -1784,6 +1788,28 @@ void App::returnFromPlugin() {
 
 // ─── Live-drag screens ──────────────────────────────────────────────────────
 
+// The book selected on the shelf, opened on the reader panel.
+void App::openShelfSelectedBook(uint32_t nowMs) {
+  const size_t row = bookPickerSelectedIndex_ > 0 ? bookPickerSelectedIndex_ - 1 : 0;
+  if (row >= bookPickerBookIndices_.size()) {
+    renderBookPicker();
+    return;
+  }
+  const size_t bookIndex = bookPickerBookIndices_[row];
+  if (!(usingStorageBook_ && bookIndex == currentBookIndex_)) {
+    saveReadingPosition(true);
+    if (!loadBookAtIndex(bookIndex, nowMs, true, true, true, true)) {
+      display_.renderStatus(tr3(TrKey3::ErrorLabel), storage_.bookDisplayName(bookIndex), storage_.lastFailure());
+      delay(2200);
+      renderBookPicker();
+      return;
+    }
+  }
+  bookDetailsMenuItems_.clear();
+  menuScreen_ = MenuScreen::Main;
+  setState(AppState::Paused, nowMs);
+}
+
 bool App::handleNanoTouch(const TouchEvent &event, uint32_t nowMs) {
   if (menuScreen_ == MenuScreen::GoToPosition) {
     return handleGoToTouch(event, nowMs);
@@ -1841,10 +1867,24 @@ bool App::handleNanoTouch(const TouchEvent &event, uint32_t nowMs) {
       if (!g.detail.contains(event.x, event.y)) {
         return true;
       }
-      // Tap on the title strip: the book's detail page (chapters, restart,
-      // delete).
+      if (lastMenuActionAtMs_ != 0 && nowMs - lastMenuActionAtMs_ < kMenuActionDebounceMs) {
+        return true;
+      }
+      lastMenuActionAtMs_ = nowMs;
+      const bool read = g.readButton.contains(event.x, event.y);
+      nanoShelfPressedId_ = read ? nano::kShelfReadId : nano::kShelfOptionsId;
+      renderBookPicker();
+      delay(kPressFlashMs);
+      nanoShelfPressedId_ = 0;
+      if (read) {
+        openShelfSelectedBook(nowMs);
+        return true;
+      }
+      // "Opcje" or the title: the book's page (chapters, restart, delete).
       if (bookPickerSelectedIndex_ >= 1 && bookPickerSelectedIndex_ - 1 < bookPickerBookIndices_.size()) {
         openBookDetails(bookPickerBookIndices_[bookPickerSelectedIndex_ - 1], nowMs);
+      } else {
+        renderBookPicker();
       }
       return true;
     }
@@ -1866,23 +1906,7 @@ bool App::handleNanoTouch(const TouchEvent &event, uint32_t nowMs) {
       }
     }
     lastMenuActionAtMs_ = nowMs;
-    const size_t row = bookPickerSelectedIndex_ > 0 ? bookPickerSelectedIndex_ - 1 : 0;
-    if (row >= bookPickerBookIndices_.size()) {
-      return true;
-    }
-    const size_t bookIndex = bookPickerBookIndices_[row];
-    if (!(usingStorageBook_ && bookIndex == currentBookIndex_)) {
-      saveReadingPosition(true);
-      if (!loadBookAtIndex(bookIndex, nowMs, true, true, true, true)) {
-        display_.renderStatus(tr3(TrKey3::ErrorLabel), storage_.bookDisplayName(bookIndex), "");
-        delay(1400);
-        renderBookPicker();
-        return true;
-      }
-    }
-    bookDetailsMenuItems_.clear();
-    menuScreen_ = MenuScreen::Main;
-    setState(AppState::Paused, nowMs);
+    openShelfSelectedBook(nowMs);
     return true;
   }
 

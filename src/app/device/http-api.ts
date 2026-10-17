@@ -38,6 +38,15 @@ import {
   type ReaderOptions,
 } from "./api";
 import { tr } from "../i18n/index";
+import {
+  rememberBooks,
+  rememberCaps,
+  rememberInfo,
+  rememberPicture,
+  rememberPlugins,
+  rememberSettings,
+  rememberWifi,
+} from "./snapshot";
 
 // Requests to the reader never hang: a phone that silently left the
 // reader's Wi-Fi otherwise waits a minute or more before fetch gives up.
@@ -235,10 +244,12 @@ export class HttpDeviceApi implements DeviceApi {
     // entry carries the .epub name, so compare without the extension.
     const stem = (name: string) => name.replace(/\.[^./]+$/, "");
     const current = data.current ? stem(data.current) : "";
-    return data.books.map((b) => {
+    const books = data.books.map((b) => {
       const book = { ...b, title: b.title?.normalize("NFC"), author: b.author?.normalize("NFC") };
       return current && stem(b.name) === current ? { ...book, current: true } : book;
     });
+    rememberBooks(books);
+    return books;
   }
 
   async uploadBook(
@@ -300,7 +311,9 @@ export class HttpDeviceApi implements DeviceApi {
 
   async getSettings(): Promise<DeviceSettings> {
     const fw = await this.json<FirmwareSettings>(await fetch(this.url("/api/settings"), { signal: timed() }));
-    return fromFirmware(fw);
+    const settings = fromFirmware(fw);
+    rememberSettings(settings);
+    return settings;
   }
 
   async putSettings(patch: Partial<DeviceSettings>): Promise<DeviceSettings> {
@@ -310,7 +323,9 @@ export class HttpDeviceApi implements DeviceApi {
       body: JSON.stringify(toFirmware(patch)),
     });
     const fw = await this.json<FirmwareSettings>(res);
-    return fromFirmware(fw);
+    const settings = fromFirmware(fw);
+    rememberSettings(settings);
+    return settings;
   }
 
   /**
@@ -345,7 +360,9 @@ export class HttpDeviceApi implements DeviceApi {
   }
 
   async getWifiStation(): Promise<WifiStationConfig> {
-    return this.json<WifiStationConfig>(await fetch(this.url("/api/wifi"), { signal: timed() }));
+    const wifi = await this.json<WifiStationConfig>(await fetch(this.url("/api/wifi"), { signal: timed() }));
+    rememberWifi(wifi);
+    return wifi;
   }
 
   async setWifiStation(ssid: string, password: string): Promise<WifiStationConfig> {
@@ -378,6 +395,7 @@ export class HttpDeviceApi implements DeviceApi {
 
   async getPlugins(): Promise<PluginInfo[]> {
     const data = await this.json<{ plugins: PluginInfo[] }>(await fetch(this.url("/api/plugins"), { signal: timed() }));
+    rememberPlugins(data.plugins);
     return data.plugins;
   }
 
@@ -439,11 +457,14 @@ export class HttpDeviceApi implements DeviceApi {
       firmwareVersion: string;
       features: Omit<DeviceCapabilities, "api" | "firmwareVersion">;
     }>(await fetch(this.url("/api/capabilities"), { signal: timed() }));
-    return { api: data.api, firmwareVersion: data.firmwareVersion, ...data.features };
+    const caps = { api: data.api, firmwareVersion: data.firmwareVersion, ...data.features };
+    rememberCaps(caps);
+    return caps;
   }
 
   async getDeviceInfo(): Promise<DeviceInfo> {
     const data = await this.json<{ info: DeviceInfo }>(await fetch(this.url("/api/state"), { signal: timed() }));
+    rememberInfo(data.info);
     return data.info;
   }
 
@@ -506,14 +527,41 @@ export class HttpDeviceApi implements DeviceApi {
     await this.json(res);
   }
 
+  async setBookNames(name: string, title: string, author: string): Promise<void> {
+    const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ").trim();
+    const res = await fetch(this.url(`/api/books/names?name=${encodeURIComponent(name)}`), {
+      method: "PUT",
+      headers: { "content-type": "text/plain; charset=utf-8" },
+      body: `${oneLine(title)}\n${oneLine(author)}`,
+      signal: timed(),
+    });
+    if (res.status === 404 && !(await res.clone().text()).includes("Book not found")) {
+      throw new Error(tr("err.noRename"));
+    }
+    await this.json(res);
+  }
+
+  async resetBookNames(name: string): Promise<void> {
+    const res = await fetch(this.url(`/api/books/names?name=${encodeURIComponent(name)}`), {
+      method: "DELETE",
+      signal: timed(),
+    });
+    await this.json(res);
+  }
+
   async getBookPicture(name: string, kind: PictureKind): Promise<Blob | null> {
     const res = await fetch(
       this.url(`/api/books/picture?name=${encodeURIComponent(name)}&kind=${kind}`),
       { signal: timed() },
     );
-    if (res.status === 404) return null;
+    if (res.status === 404) {
+      void rememberPicture(name, kind, null);
+      return null;
+    }
     if (!res.ok) throw new Error(tr("err.pictureGet", { status: res.status }));
-    return res.blob();
+    const blob = await res.blob();
+    void rememberPicture(name, kind, blob);
+    return blob;
   }
 
   async uploadBookPicture(name: string, kind: PictureKind, data: Blob): Promise<void> {

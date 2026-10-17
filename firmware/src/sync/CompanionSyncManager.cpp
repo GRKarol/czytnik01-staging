@@ -852,6 +852,12 @@ void CompanionSyncManager::handleBookTextStatic() {
   }
 }
 
+void CompanionSyncManager::handleBookNamesStatic() {
+  if (instance_ != nullptr) {
+    instance_->handleBookNames();
+  }
+}
+
 void CompanionSyncManager::handleBookChaptersStatic() {
   if (instance_ != nullptr) {
     instance_->handleBookChapters();
@@ -1022,6 +1028,8 @@ bool CompanionSyncManager::startServer() {
   server_.on("/api/books/text", HTTP_GET, handleBookTextStatic);
   server_.on("/api/books/chapters", HTTP_PUT, handleBookChaptersStatic);
   server_.on("/api/books/chapters", HTTP_DELETE, handleBookChaptersStatic);
+  server_.on("/api/books/names", HTTP_PUT, handleBookNamesStatic);
+  server_.on("/api/books/names", HTTP_DELETE, handleBookNamesStatic);
   server_.on("/api/books/picture", HTTP_GET, handleBookPictureStatic);
   server_.on("/api/books/picture", HTTP_DELETE, handleBookPictureStatic);
   server_.on("/api/books/picture", HTTP_POST, handleBookPictureStatic, handleBookPictureUploadStatic);
@@ -1174,6 +1182,9 @@ String CompanionSyncManager::booksJsonArray() {
         readingPath = String(directoryPath) + "/" + withExtension(name, ".rsvp");
       }
       const RsvpMetadata metadata = readRsvpMetadata(readingPath);
+      String titleUtf8 = UnicodeFold::toUtf8(metadata.title);
+      String authorUtf8 = UnicodeFold::toUtf8(metadata.author);
+      const bool renamed = BookExtras::readNames(path, titleUtf8, authorUtf8);
       uint8_t progressPercent = 0;
       const bool hasProgress = progressPercentForPath(readingPath, progressPercent);
       if (!first) {
@@ -1181,8 +1192,11 @@ String CompanionSyncManager::booksJsonArray() {
       }
       first = false;
       body += "{\"name\":\"" + jsonEscape(relativeLibraryName(path)) + "\",\"category\":\"" +
-              libraryCategoryForPath(path) + "\",\"title\":\"" + jsonEscape(UnicodeFold::toUtf8(metadata.title)) +
-              "\",\"author\":\"" + jsonEscape(UnicodeFold::toUtf8(metadata.author)) + "\",\"bytes\":" + String(file.second);
+              libraryCategoryForPath(path) + "\",\"title\":\"" + jsonEscape(titleUtf8) +
+              "\",\"author\":\"" + jsonEscape(authorUtf8) + "\",\"bytes\":" + String(file.second);
+      if (renamed) {
+        body += ",\"renamed\":true";
+      }
       if (hasProgress) {
         body += ",\"progressPercent\":" + String(progressPercent);
       }
@@ -1491,7 +1505,10 @@ void CompanionSyncManager::handleBookText() {
   IndexedBookStore store;
   BookMetadata metadata;
   if (!storage_->openIndexedBookAtPath(path, store, metadata)) {
-    server_.send(500, "application/json", "{\"ok\":false,\"error\":\"Cannot open book\"}");
+    const String reason = storage_->lastFailure();
+    server_.send(500, "application/json",
+                 String("{\"ok\":false,\"error\":\"Cannot open book") +
+                     (reason.isEmpty() ? String() : ": " + jsonEscape(reason)) + "\"}");
     return;
   }
 
@@ -1552,6 +1569,44 @@ void CompanionSyncManager::handleBookText() {
   body += "]}";
   store.close();
   server_.send(200, "application/json", body);
+}
+
+// PUT /api/books/names?name=   body "title\nauthor" (UTF-8): the book's
+// name in the library, on the Czytaj card and the reader panel, without
+// touching the file. DELETE goes back to the title and author in the file.
+void CompanionSyncManager::handleBookNames() {
+  sendCorsHeaders();
+  const String path = resolveLibraryPath(server_.arg("name"));
+  if (path.isEmpty()) {
+    server_.send(404, "application/json", "{\"ok\":false,\"error\":\"Book not found\"}");
+    return;
+  }
+  if (server_.method() == HTTP_DELETE) {
+    BookExtras::removeNames(path);
+    libraryChanged_ = true;
+    logLine("Name reset: " + displayNameForPath(path));
+    server_.send(200, "application/json", "{\"ok\":true}");
+    return;
+  }
+  const String body = server_.arg("plain");
+  const int newline = body.indexOf('\n');
+  String title = newline < 0 ? body : body.substring(0, newline);
+  String author = newline < 0 ? String() : body.substring(newline + 1);
+  title.trim();
+  author.trim();
+  if (title.isEmpty() && author.isEmpty()) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"Empty name\"}");
+    return;
+  }
+  if (!BookExtras::writeNames(path, title, author)) {
+    server_.send(500, "application/json", "{\"ok\":false,\"error\":\"Cannot save name\"}");
+    return;
+  }
+  statusLine1_ = "Book renamed";
+  statusLine2_ = title;
+  libraryChanged_ = true;
+  logLine("Book renamed: " + displayNameForPath(path) + " -> " + title);
+  server_.send(200, "application/json", "{\"ok\":true}");
 }
 
 void CompanionSyncManager::handleBookChapters() {
@@ -1880,6 +1935,7 @@ void CompanionSyncManager::handleCapabilities() {
   body += ",\"pluginsInstallPackage\":false";
   body += ",\"bookPictures\":true";
   body += ",\"chapterEditor\":true";
+  body += ",\"bookNames\":true";
   body += ",\"bluetoothTransfer\":";
 #if FLOWER_BLE_ENABLED
   body += "true";

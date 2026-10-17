@@ -539,11 +539,11 @@ export class CoverEditor extends LitElement {
     }
     .sheet {
       width: min(560px, 100%);
-      max-height: 100%;
+      max-height: calc(100% - var(--safe-top, 0px));
       overflow-y: auto;
       background: var(--paper, #f8f4ec);
       border-radius: 18px 18px 0 0;
-      padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
+      padding: 14px 16px calc(16px + var(--safe-bottom, env(safe-area-inset-bottom, 0px)));
       display: flex;
       flex-direction: column;
       gap: 12px;

@@ -240,6 +240,14 @@ export class BleDeviceApi implements DeviceApi {
     throw new Error(bleUnsupported());
   }
 
+  async setBookNames(): Promise<void> {
+    throw new Error(bleUnsupported());
+  }
+
+  async resetBookNames(): Promise<void> {
+    throw new Error(bleUnsupported());
+  }
+
   async getBookPicture(): Promise<Blob | null> {
     return null;
   }

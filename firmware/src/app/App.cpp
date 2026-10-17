@@ -59,6 +59,11 @@ constexpr uint32_t kFontDownloadRetryIntervalMs = 60000;
 // jeszcze nie wgrał tego tytułu dla danego języka) to nie błąd, po prostu
 // mniej pozycji w bibliotece na starcie — patrz bookDownloadTask().
 constexpr uint8_t kStarterBookCountPerLanguage = StarterTitles::kPerLanguage;
+// "@edition N" in a starter book's header (generate_starter_library.py
+// STARTER_EDITION). A copy on the card from an older edition is fetched
+// again: edition 1 had the Polish books cut after 4 chapters and titles with
+// no chapters at all.
+constexpr int kStarterBookEdition = 2;
 // Minimum time the splash artwork stays up once the main loop starts (on
 // top of the black beat below and the two 600 ms fades) — was 5000 ms, an
 // artificial floor that had nothing to do with hardware readiness (all real
@@ -110,7 +115,8 @@ constexpr uint32_t kPreviewBrowseHoldMs = 240;
 constexpr uint32_t kReaderDoubleTapWindowMs = 520;
 // The right button (BOOT): a short press turns the screen off, held past
 // kThemeToggleHoldMs it changes the reading theme (while still held).
-constexpr uint32_t kThemeToggleHoldMs = 2000;
+// 2 s plus the repaint read as "over 3 s" (Karol 17.10).
+constexpr uint32_t kThemeToggleHoldMs = 800;
 constexpr uint32_t kScrollAnimationFrameMs = 16;
 constexpr uint16_t kSwipeThresholdPx = 40;
 constexpr uint16_t kAxisBiasPx = 12;
@@ -141,6 +147,12 @@ enum NanoTypographyFrom : uint8_t {
 // (capacitive-touch contact bounce reads as two quick taps from one
 // physical touch).
 constexpr uint32_t kGridTapDebounceMs = 200;
+// Any screen of the menu: a touch that starts this soon after the previous
+// one was released and handled is dropped whole (Start to End). Counted
+// from when the handling finished, so a bounce that arrives while the next
+// screen is still being drawn is dropped as well. The keyboard is left out
+// (fast typing), and so is the reader, whose double tap starts reading.
+constexpr uint32_t kMenuTouchQuietMs = 200;
 // Keyboard keys fire on finger-down (handleTextEntryTouch). A finger that
 // loses contact for a sample or two mid-press comes back as a new touch
 // within a few tens of ms of its release; a real second press of the same
@@ -3222,9 +3234,27 @@ void App::handleTouch(uint32_t nowMs) {
     return;
   }
   if (state_ == AppState::Menu) {
+    if (ev.phase == TouchPhase::Start) {
+      menuTouchSwallowed_ = menuScreen_ != MenuScreen::TextEntry &&
+                            static_cast<int32_t>(menuTouchQuietUntilMs_ - nowMs) > 0;
+    }
+    if (menuTouchSwallowed_) {
+      if (ev.phase == TouchPhase::End) {
+        menuTouchSwallowed_ = false;
+        Serial.println("[touch] dropped: too soon after the last tap");
+      }
+      return;
+    }
     applyMenuTouchGesture(ev, nowMs);
+    if (ev.phase == TouchPhase::End) {
+      menuTouchQuietUntilMs_ = millis() + kMenuTouchQuietMs;
+    }
   } else {
+    menuTouchSwallowed_ = false;
     applyPausedTouchGesture(ev, nowMs);
+    if (ev.phase == TouchPhase::End && state_ == AppState::Menu) {
+      menuTouchQuietUntilMs_ = millis() + kMenuTouchQuietMs;
+    }
   }
 }
 
@@ -3318,7 +3348,7 @@ void App::applyPausedTouchGesture(const TouchEvent &event, uint32_t nowMs) {
             openTextEntry(TextEntryPurpose::SavePointName,
                           tr3(TrKey3::NameBookmark),
                           tr3(TrKey3::EnterNamePrompt),
-                          "", defaultName, "", false, 30,
+                          "", "", defaultName, false, 30,
                           MenuScreen::SavePointsList);
           } else {
             finishSavePointCreation(defaultName, nowMs);
@@ -3435,7 +3465,7 @@ void App::applyPausedTouchGesture(const TouchEvent &event, uint32_t nowMs) {
         openTextEntry(TextEntryPurpose::SavePointName,
                       tr3(TrKey3::NameBookmark),
                       tr3(TrKey3::EnterNamePrompt),
-                      "", defaultName, "", false, 30,
+                      "", "", defaultName, false, 30,
                       MenuScreen::SavePointsList);
       } else {
         finishSavePointCreation(defaultName, nowMs);
@@ -6591,6 +6621,7 @@ void App::rebuildSettingsMenuItems() {
     settingsMenuItems_.push_back(tr3(TrKey3::ColorYellow));
     settingsMenuItems_.push_back(tr3(TrKey3::ColorOrange));
     settingsMenuItems_.push_back(tr3(TrKey3::ColorPurple));
+    settingsMenuItems_.push_back(tr4(TrKey4::ColorPink));
   } else if (menuScreen_ == MenuScreen::WelcomeReadingMode) {
     // First-run wizard — krok 2.2. Sposób czytania. Podgląd każdego trybu
     // to teraz osobna ikonka oka w rogu (applyReadingModePreviewButtonLayout()),
@@ -8293,6 +8324,32 @@ void App::pollFontDownloadResult(uint32_t nowMs) {
 // który generuje te assety w tym samym formacie co
 // firmware/tools/sd_card_converter/convert_books.py.
 namespace {
+// The "@edition" number in the header of a starter book on the card, 1 when
+// it has none (the first edition), 0 when the file can't be read.
+int starterBookEditionOnCard(const String &path) {
+  File file = SD_MMC.open(path, FILE_READ);
+  if (!file || file.isDirectory()) {
+    if (file) {
+      file.close();
+    }
+    return 0;
+  }
+  int edition = 1;
+  for (int line = 0; line < 8 && file.available(); ++line) {
+    String text = file.readStringUntil('\n');
+    text.trim();
+    if (!text.startsWith("@")) {
+      break;
+    }
+    if (text.startsWith("@edition ")) {
+      edition = text.substring(9).toInt();
+      break;
+    }
+  }
+  file.close();
+  return edition;
+}
+
 String starterBookLanguageCode(UiLanguage lang) {
   switch (lang) {
     case UiLanguage::Polish: return "pl";
@@ -8368,7 +8425,7 @@ void App::bookDownloadTask(void *params) {
       const String assetName = "starter-" + code + "-" + String(i) + ".rsvp";
       const String destPath = "/books/books/" + assetName;
       String errorDetail;
-      if (SD_MMC.exists(destPath)) {
+      if (SD_MMC.exists(destPath) && starterBookEditionOnCard(destPath) >= kStarterBookEdition) {
         // Fetched before a restart (update, power off): keep it.
         g_bookDlDone = i;
         continue;
@@ -9089,6 +9146,7 @@ String App::focusColorLabel() const {
     case 3: return tr3(TrKey3::ColorYellow);
     case 4: return tr3(TrKey3::ColorOrange);
     case 5: return tr3(TrKey3::ColorPurple);
+    case 6: return tr4(TrKey4::ColorPink);
     default: return tr3(TrKey3::ColorRed);
   }
 }
@@ -9096,7 +9154,7 @@ String App::focusColorLabel() const {
 void App::cycleFocusColor(uint32_t nowMs) {
   const uint8_t index = display_.focusColorIndex();
   uint8_t next = index == DisplayManager::kFocusColorCustom ? 0 : index + 1;
-  if (next >= 6) next = 0;
+  if (next >= DisplayManager::presetFocusColorCount()) next = 0;
   display_.setFocusColorIndex(next);
   preferences_.putUChar(kPrefFocusColorIndex, next);
   applyDisplayPreferences(nowMs);
@@ -9543,8 +9601,8 @@ void App::selectBookDetailsItem(uint32_t nowMs) {
       saveReadingPosition(true);
       if (!loadBookAtIndex(bookDetailsBookIndex_, nowMs, true, true, true, true)) {
         display_.renderStatus(tr3(TrKey3::ErrorLabel),
-                              storage_.bookDisplayName(bookDetailsBookIndex_), "");
-        delay(1400);
+                              storage_.bookDisplayName(bookDetailsBookIndex_), storage_.lastFailure());
+        delay(2200);
         renderBookDetails();
         return;
       }
@@ -9559,8 +9617,8 @@ void App::selectBookDetailsItem(uint32_t nowMs) {
       saveReadingPosition(true);
       if (!loadBookAtIndex(bookDetailsBookIndex_, nowMs, true, true, true, true)) {
         display_.renderStatus(tr3(TrKey3::ErrorLabel),
-                              storage_.bookDisplayName(bookDetailsBookIndex_), "");
-        delay(1400);
+                              storage_.bookDisplayName(bookDetailsBookIndex_), storage_.lastFailure());
+        delay(2200);
         renderBookDetails();
         return;
       }
@@ -9571,8 +9629,8 @@ void App::selectBookDetailsItem(uint32_t nowMs) {
       saveReadingPosition(true);
       if (!loadBookAtIndex(bookDetailsBookIndex_, nowMs, true, true, true, true)) {
         display_.renderStatus(tr3(TrKey3::ErrorLabel),
-                              storage_.bookDisplayName(bookDetailsBookIndex_), "");
-        delay(1400);
+                              storage_.bookDisplayName(bookDetailsBookIndex_), storage_.lastFailure());
+        delay(2200);
         renderBookDetails();
         return;
       }
@@ -9948,8 +10006,13 @@ void App::openSavePointsList() {
   savePointMenuItems_.push_back(uiText(UiText::Back));
   savePointMenuItems_.push_back(tr3(TrKey3::AddSavePoint));
 
+  savePointRows_.clear();
   for (size_t i = 0; i < savePoints_.size(); ++i) {
     const auto &sp = savePoints_[i];
+    if (!usingStorageBook_ || sp.bookPath != currentBookPath_) {
+      continue;
+    }
+    savePointRows_.push_back(i);
     String label = sp.name.isEmpty() ? sp.bookTitle : sp.name;
     savePointMenuItems_.push_back(label);
     // No colon in this label on purpose: a colon makes isDestructiveGridLabel()
@@ -9960,9 +10023,22 @@ void App::openSavePointsList() {
     savePointMenuItems_.push_back(String(tr3(TrKey3::DeleteSpace)) + label);
   }
 
-  savePointSelectedIndex_ = savePoints_.empty() ? 1 : 2;
+  savePointSelectedIndex_ = savePointRows_.empty() ? 1 : 2;
   menuScreen_ = MenuScreen::SavePointsList;
   renderSavePointsList();
+}
+
+size_t App::savePointCountForCurrentBook() const {
+  if (!usingStorageBook_) {
+    return 0;
+  }
+  size_t count = 0;
+  for (const SavePoint &sp : savePoints_) {
+    if (sp.bookPath == currentBookPath_) {
+      ++count;
+    }
+  }
+  return count;
 }
 
 void App::selectSavePointItem(uint32_t nowMs) {
@@ -9990,12 +10066,13 @@ void App::selectSavePointItem(uint32_t nowMs) {
 
   // Items after index 1: alternating save point / delete
   const size_t itemOffset = savePointSelectedIndex_ - 2;
-  const size_t spIndex = itemOffset / 2;
+  const size_t row = itemOffset / 2;
   const bool isDeleteButton = (itemOffset % 2) == 1;
 
-  if (spIndex >= savePoints_.size()) {
+  if (row >= savePointRows_.size() || savePointRows_[row] >= savePoints_.size()) {
     return;
   }
+  const size_t spIndex = savePointRows_[row];
 
   if (isDeleteButton) {
     openSavePointDeleteConfirm(spIndex, nowMs);
@@ -10782,8 +10859,19 @@ void App::refreshLibraryFromCompanion(uint32_t nowMs) {
     const size_t resumeIndex = reader_.currentIndex();
     const int refreshedBookIndex = findBookIndexByPath(currentBookPath_);
     if (refreshedBookIndex >= 0) {
-      if (loadBookAtIndex(static_cast<size_t>(refreshedBookIndex), nowMs, false, false, false, false)) {
-        reader_.seekTo(resumeIndex);
+      // A file sent again under the same name has a stale index, so the
+      // quick reopen fails; build the index then instead of leaving the
+      // reader on a closed book (opening it from the shelf showed "Blad").
+      const size_t bookIndex = static_cast<size_t>(refreshedBookIndex);
+      if (loadBookAtIndex(bookIndex, nowMs, false, false, false, false) ||
+          loadBookAtIndex(bookIndex, nowMs, false, true, true, true)) {
+        reader_.seekTo(std::min(resumeIndex, reader_.wordCount() > 0 ? reader_.wordCount() - 1 : 0));
+      } else {
+        activeBookStore_.close();
+        reader_.clearLoadedBook(nowMs);
+        usingStorageBook_ = false;
+        currentBookPath_ = "";
+        currentBookTitle_ = "";
       }
     } else {
       // Deleted from the app while it was open, like executeDeleteBook().
@@ -11996,7 +12084,6 @@ void App::saveReadingPosition(bool force) {
   preferences_.putUInt(bookPositionKey(currentBookPath_).c_str(), static_cast<uint32_t>(wordIndex));
   preferences_.putUInt(bookWordCountKey(currentBookPath_).c_str(),
                        static_cast<uint32_t>(reader_.wordCount()));
-  preferences_.putUInt(kPrefLegacyWordIndex, static_cast<uint32_t>(wordIndex));
   preferences_.putUShort(kPrefWpm, reader_.wpm());
   markBookRecent(currentBookPath_);
   lastSavedWordIndex_ = wordIndex;
@@ -12167,12 +12254,13 @@ uint32_t App::savedWordIndexForBook(const String &bookPath, bool allowLegacyFall
     return preferences_.getUInt(key.c_str(), 0);
   }
 
-  if (allowLegacyFallback && preferences_.isKey(kPrefLegacyWordIndex)) {
-    const uint32_t legacyWordIndex = preferences_.getUInt(kPrefLegacyWordIndex, 0);
-    preferences_.putUInt(key.c_str(), legacyWordIndex);
-    Serial.printf("[app] migrated legacy position word=%u to key=%s\n",
-                  static_cast<unsigned int>(legacyWordIndex), key.c_str());
-    return legacyWordIndex;
+  // The old single "word" key held the position of whichever book was read
+  // last, and every save rewrote it, so a book opened for the first time
+  // started at the previous book's place. Each book has its own key now;
+  // the shared one is dropped instead of migrated.
+  (void)allowLegacyFallback;
+  if (preferences_.isKey(kPrefLegacyWordIndex)) {
+    preferences_.remove(kPrefLegacyWordIndex);
   }
 
   return kNoSavedWordIndex;

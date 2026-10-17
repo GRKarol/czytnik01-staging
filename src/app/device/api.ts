@@ -1,4 +1,5 @@
 import { tr } from "../i18n/index";
+import { SnapshotDeviceApi } from "./snapshot";
 /**
  * Wyższego rzędu API urządzenia: biblioteka, ustawienia, plugins, dev mode.
  *
@@ -148,6 +149,8 @@ export interface Book {
   customChapters?: boolean;
   /** The book open on the reader now. */
   current?: boolean;
+  /** Title/author set in this app over the ones in the file. */
+  renamed?: boolean;
 }
 
 export type PictureKind = "cover" | "spine";
@@ -240,6 +243,8 @@ export interface DeviceCapabilities {
   bookPictures?: boolean;
   /** Chapter editor endpoints (firmware 0.3.62+). */
   chapterEditor?: boolean;
+  /** Renaming a book (firmware 0.4.14+). */
+  bookNames?: boolean;
 }
 
 export interface DeviceInfo {
@@ -309,7 +314,7 @@ export const DEFAULT_SETTINGS: DeviceSettings = {
     screensaverTimeoutMin: [1, 2, 3, 5, 10, 15, 20, 30, 0],
     screensaverAutoOffMin: [0, 5, 10, 15, 20, 30, 45, 60],
     sleepGuardMin: [0, 5, 10, 15, 20, 30, 45, 60],
-    focusColors: [0xf800, 0x001f, 0x07e0, 0xffe0, 0xfd20, 0xa01f],
+    focusColors: [0xf800, 0x001f, 0x07e0, 0xffe0, 0xfd20, 0xa01f, 0xfa74],
     palettes: [
       { n: "Classic" },
       { n: "Mocha", c: [0x18e5, 0xcebe, 0xf455] },
@@ -386,6 +391,10 @@ export interface DeviceApi {
   setBookChapters(name: string, chapters: ChapterMark[]): Promise<void>;
   /** Back to the chapters the reader finds in the text. */
   resetBookChapters(name: string): Promise<void>;
+  /** The book's title and author on the reader, without touching the file. */
+  setBookNames(name: string, title: string, author: string): Promise<void>;
+  /** Back to the title and author in the file. */
+  resetBookNames(name: string): Promise<void>;
   /** Raw "FBI1" picture file, null when the book has none. */
   getBookPicture(name: string, kind: PictureKind): Promise<Blob | null>;
   uploadBookPicture(name: string, kind: PictureKind, data: Blob): Promise<void>;
@@ -702,6 +711,22 @@ export class MockDeviceApi implements DeviceApi {
     await this.delay(undefined, 150);
   }
 
+  async setBookNames(name: string, title: string, author: string): Promise<void> {
+    const list = read<Book[]>(STORE_BOOKS, MOCK_BOOKS_SEED).map((b) =>
+      b.name === name ? { ...b, title, author, renamed: true } : b,
+    );
+    write(STORE_BOOKS, list);
+    await this.delay(undefined, 150);
+  }
+
+  async resetBookNames(name: string): Promise<void> {
+    const list = read<Book[]>(STORE_BOOKS, MOCK_BOOKS_SEED).map((b) =>
+      b.name === name ? { ...b, renamed: false } : b,
+    );
+    write(STORE_BOOKS, list);
+    await this.delay(undefined, 150);
+  }
+
   async getBookPicture(name: string, kind: PictureKind): Promise<Blob | null> {
     const data = this.extras(name)[kind];
     if (!data) return this.delay(null, 100);
@@ -780,7 +805,13 @@ function stripExt(name: string): string {
 // Komponenty subskrybują zmianę przez `onDeviceApiChange()` — kiedy
 // API się przełączy, są informowane żeby odświeżyć dane.
 
-let _api: DeviceApi = new MockDeviceApi();
+// Without a reader: its last known state, read-only (device/snapshot.ts).
+let _api: DeviceApi = new SnapshotDeviceApi(DEFAULT_SETTINGS);
+
+/** What the app talks to while no reader is connected. */
+export function offlineDeviceApi(): DeviceApi {
+  return new SnapshotDeviceApi(DEFAULT_SETTINGS);
+}
 const _apiListeners = new Set<(api: DeviceApi) => void>();
 
 export const deviceApi = {
@@ -822,6 +853,8 @@ export const deviceApi = {
     _api.getBookText(name, from, count, words),
   setBookChapters: (name: string, chapters: ChapterMark[]) => _api.setBookChapters(name, chapters),
   resetBookChapters: (name: string) => _api.resetBookChapters(name),
+  setBookNames: (name: string, title: string, author: string) => _api.setBookNames(name, title, author),
+  resetBookNames: (name: string) => _api.resetBookNames(name),
   getBookPicture: (name: string, kind: PictureKind) => _api.getBookPicture(name, kind),
   uploadBookPicture: (name: string, kind: PictureKind, data: Blob) =>
     _api.uploadBookPicture(name, kind, data),

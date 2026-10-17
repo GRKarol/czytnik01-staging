@@ -11,12 +11,12 @@ import { css } from "lit";
  */
 export const themeTokens = css`
   :host {
-    --bg: #000000;
-    --surface: #141518;
-    --surface-2: #1d1e23;
-    --surface-3: #2a2c33;
-    --outline: #34363e;
-    --text: #f2f2f4;
+    --bg: #202227;
+    --surface: #2a2c32;
+    --surface-2: #32353c;
+    --surface-3: #3d4048;
+    --outline: #474a53;
+    --text: #ececef;
     --text-2: #b7b9c2;
     --muted: #8a8d98;
     --accent: #3d5afe;

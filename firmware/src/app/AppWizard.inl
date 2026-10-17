@@ -192,9 +192,10 @@ void App::renderWizardPage() {
       view.title = tr3(TrKey3::WelcomeHighlightColorTitle);
       view.subtitle = tr4(TrKey4::WizColorSub);
       addChips(nano::WizardChipArt::Swatch);
-      // Two rows of three: room for the longest color name.
+      // Two rows of four (seven colors with pink); a long name drops to
+      // the small font inside its chip.
       view.chipRows = 2;
-      view.chipColumns = 3;
+      view.chipColumns = 4;
       for (size_t i = 0; i < view.chips.size(); ++i) {
         view.chips[i].swatch = DisplayManager::presetFocusColor(static_cast<uint8_t>(i));
       }

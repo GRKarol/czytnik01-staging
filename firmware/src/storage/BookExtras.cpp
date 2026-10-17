@@ -13,6 +13,8 @@ constexpr const char *kLiveRoot = "/config/books";
 constexpr const char *kArchiveRoot = "/config/archive";
 constexpr uint32_t kPictureMagic = 0x31494246UL;  // "FBI1"
 constexpr const char *kChaptersMagic = "FCH1";
+constexpr const char *kNamesMagic = "FNM1";
+constexpr unsigned int kMaxNameBytes = 120;
 constexpr size_t kPictureHeaderBytes = 8;
 constexpr size_t kCacheSlots = 32;
 
@@ -390,6 +392,76 @@ void applyChapters(const String &bookPath, BookMetadata &metadata) {
                 static_cast<unsigned>(valid.size()), static_cast<unsigned>(metadata.chapters.size()),
                 bookPath.c_str());
   metadata.chapters = valid;
+}
+
+bool readNames(const String &bookPath, String &title, String &author) {
+  const String path = folderFor(bookPath) + "/names.txt";
+  if (!SD_MMC.exists(path)) {
+    return false;
+  }
+  File file = SD_MMC.open(path, FILE_READ);
+  if (!file) {
+    return false;
+  }
+  String line = file.readStringUntil('\n');
+  line.trim();
+  if (line != kNamesMagic) {
+    file.close();
+    return false;
+  }
+  String ownTitle = file.readStringUntil('\n');
+  String ownAuthor = file.readStringUntil('\n');
+  file.close();
+  ownTitle.trim();
+  ownAuthor.trim();
+  if (!ownTitle.isEmpty()) {
+    title = ownTitle;
+  }
+  if (!ownAuthor.isEmpty()) {
+    author = ownAuthor;
+  }
+  return true;
+}
+
+bool writeNames(const String &bookPath, const String &title, const String &author) {
+  if (!ensureFolder(bookPath)) {
+    return false;
+  }
+  const auto oneLine = [](String text) {
+    text.replace("\r", " ");
+    text.replace("\n", " ");
+    text.trim();
+    if (text.length() > kMaxNameBytes) {
+      text.remove(kMaxNameBytes);
+    }
+    return text;
+  };
+  const String target = folderFor(bookPath) + "/names.txt";
+  const String temp = target + ".tmp";
+  SD_MMC.remove(temp);
+  File file = SD_MMC.open(temp, FILE_WRITE);
+  if (!file) {
+    return false;
+  }
+  file.print(kNamesMagic);
+  file.print('\n');
+  file.print(oneLine(title));
+  file.print('\n');
+  file.print(oneLine(author));
+  file.print('\n');
+  file.close();
+  SD_MMC.remove(target);
+  return SD_MMC.rename(temp, target);
+}
+
+bool removeNames(const String &bookPath) {
+  const String target = folderFor(bookPath) + "/names.txt";
+  const bool existed = SD_MMC.exists(target);
+  SD_MMC.remove(target);
+  if (folderIsEmpty(folderFor(bookPath))) {
+    removeFolder(folderFor(bookPath));
+  }
+  return existed;
 }
 
 void archive(const String &bookPath) {

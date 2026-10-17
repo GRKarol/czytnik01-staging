@@ -446,6 +446,9 @@ ShelfGeometry shelfGeometry() {
   const int viewportY = bottom(g.header) + 6;
   g.viewport = Rect(content.x, viewportY, content.w, detailY - 6 - viewportY);
   g.detail = Rect(content.x, detailY, content.w, kShelfDetailHeight);
+  constexpr int kShelfButtonW = 104;
+  g.readButton = Rect(right(g.detail) - kShelfButtonW, detailY + 2, kShelfButtonW, kShelfDetailHeight - 4);
+  g.optionsButton = Rect(g.readButton.x - kGap - kShelfButtonW, detailY + 2, kShelfButtonW, kShelfDetailHeight - 4);
   g.marker = g.viewport.x + g.viewport.w / 2;
   return g;
 }
@@ -566,17 +569,18 @@ void paintShelf(DisplayManager &d, Sink &sink, const ShelfView &view) {
   d.nanoFillRoundRect(g.viewport.x, bottom(g.viewport), g.viewport.w, 3, 1, floor);
   d.nanoResetClip();
 
-  // Detail strip: title + author on the left, progress on the right.
-  const int percentW = 64;
-  const int textW = g.detail.w - percentW - 12;
+  // Detail strip: title, author and progress on the left; "Opcje" and
+  // "Czytaj" buttons on the right, so it is plain which tap reads the book
+  // and which one opens its chapters / restart / delete.
+  const int textW = g.optionsButton.x - g.detail.x - 10;
   d.nanoLabel(Rect(g.detail.x, g.detail.y, textW, 20), view.detailTitle, 2, Role::Foreground);
-  String second = view.detailAuthor;
+  String second = view.detailPercent + "  " + view.detailAuthor;
   if (!view.detailStatus.isEmpty()) {
     second += "  -  " + view.detailStatus;
   }
   d.nanoLabel(Rect(g.detail.x, g.detail.y + 20, textW, 17), second, 1, Role::Muted);
-  d.nanoLabel(Rect(right(g.detail) - percentW, g.detail.y, percentW, g.detail.h), view.detailPercent, 3, Role::Accent,
-              Align::End);
+  d.nanoPill(g.optionsButton, view.optionsLabel, Icon::List, view.pressedId == kShelfOptionsId, false);
+  d.nanoPill(g.readButton, view.readLabel, Icon::Play, view.pressedId == kShelfReadId, true);
 }
 
 // ─── Rozdzialy ──────────────────────────────────────────────────────────────
@@ -1092,16 +1096,24 @@ void paintColorPicker(DisplayManager &d, Sink &sink, const ColorPickerView &view
   String mid;
   String rest;
   splitSampleWord(view.sampleWord.isEmpty() ? String("reading") : view.sampleWord, left, mid, rest);
-  constexpr uint8_t kScale = 48;
-  const int wl = d.nanoTypefaceTextWidth(left, kScale);
-  const int wm = d.nanoTypefaceTextWidth(mid, kScale);
-  const int wr = d.nanoTypefaceTextWidth(rest, kScale);
+  // The whole word fits the box: the scale comes from the box height (it
+  // was a fixed 48%, taller than the 30 px header, so only the top half of
+  // the letters showed), then shrinks for a long word.
+  const int fullHeight = std::max(1, d.nanoTypefaceTextHeight(100));
+  int scale = std::max(10, std::min(100, (preview.h - 4) * 100 / fullHeight));
+  while (scale > 10 && d.nanoTypefaceTextWidth(left + mid + rest, static_cast<uint8_t>(scale)) > preview.w - 12) {
+    scale -= 2;
+  }
+  const uint8_t textScale = static_cast<uint8_t>(scale);
+  const int wl = d.nanoTypefaceTextWidth(left, textScale);
+  const int wm = d.nanoTypefaceTextWidth(mid, textScale);
+  const int wr = d.nanoTypefaceTextWidth(rest, textScale);
   const int tx = preview.x + (preview.w - wl - wm - wr) / 2;
-  const int ty = preview.y + 1;
+  const int ty = preview.y + (preview.h - d.nanoTypefaceTextHeight(textScale)) / 2;
   d.nanoSetClip(preview.x, preview.y, preview.w, preview.h);
-  d.nanoTypefaceText(tx, ty, left, view.previewWord, kScale);
-  d.nanoTypefaceText(tx + wl, ty, mid, view.previewFocus, kScale);
-  d.nanoTypefaceText(tx + wl + wm, ty, rest, view.previewWord, kScale);
+  d.nanoTypefaceText(tx, ty, left, view.previewWord, textScale);
+  d.nanoTypefaceText(tx + wl, ty, mid, view.previewFocus, textScale);
+  d.nanoTypefaceText(tx + wl + wm, ty, rest, view.previewWord, textScale);
   d.nanoResetClip();
 
   const Rect grid(area.x, area.y + kHeaderH + 8, area.w, area.h - kHeaderH - 8);

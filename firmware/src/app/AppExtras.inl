@@ -208,7 +208,7 @@ void App::runExtraAction(int action, uint32_t nowMs) {
       return;
     case kExtraBookmarkCustom:
       openTextEntry(TextEntryPurpose::SavePointName, tr3(TrKey3::NameBookmark), tr3(TrKey3::EnterNamePrompt), "",
-                    savePointDefaultName(), "", false, 30, MenuScreen::SavePointsList);
+                    "", savePointDefaultName(), false, 30, MenuScreen::SavePointsList);
       return;
     default:
       return;

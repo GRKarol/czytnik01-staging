@@ -41,6 +41,9 @@ const CLASSIC = {
   night: { bg: 0x0000, fg: 0xfce0 },
 };
 
+const CLASSIC_DARK_PHONE_BG = "rgb(32, 34, 39)";
+const CLASSIC_NIGHT_PHONE_BG = "rgb(34, 31, 27)";
+
 function mix(a: string, b: string, percentA: number): string {
   return `color-mix(in srgb, ${a} ${percentA}%, ${b})`;
 }
@@ -74,6 +77,13 @@ export function lookFromSettings(s: DeviceSettings): LookVars | null {
   if (softColors() && (saturation(bg) > 0.45 || contrast(bg, fg) < 7)) {
     bgCss = blend(bg, light ? [244, 242, 237] : [18, 19, 22], light ? 28 : 22);
     fgCss = blend(fg, light ? [22, 23, 26] : [241, 241, 243], 20);
+  }
+  if (!palette?.c && !light) {
+    // Classic is the reader's pure black; on a phone full of forms that read
+    // as a hole (Karol 17.10). A soft graphite instead, warmer at night,
+    // with the white eased off a little.
+    bgCss = s.theme === "night" ? CLASSIC_NIGHT_PHONE_BG : CLASSIC_DARK_PHONE_BG;
+    if (s.theme !== "night") fgCss = "#ececef";
   }
   return {
     "--bg": bgCss,

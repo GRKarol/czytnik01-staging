@@ -42,3 +42,7 @@ android/keystore.properties
 
 # Font pack built by deploy.yml for the flasher card step
 public/fonts/
+
+# Python bytecode cache — never commit
+__pycache__/
+*.pyc

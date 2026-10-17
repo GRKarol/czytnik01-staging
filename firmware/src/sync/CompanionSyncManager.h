@@ -102,6 +102,7 @@ class CompanionSyncManager {
   static void handleLogClearStatic();
   static void handleBookTextStatic();
   static void handleBookChaptersStatic();
+  static void handleBookNamesStatic();
   static void handleBookPictureStatic();
   static void handleBookPictureUploadStatic();
 
@@ -135,6 +136,7 @@ class CompanionSyncManager {
   void handleLogClear();
   void handleBookText();
   void handleBookChapters();
+  void handleBookNames();
   void handleBookPicture();
   void handleBookPictureUpload();
   String booksJsonArray();

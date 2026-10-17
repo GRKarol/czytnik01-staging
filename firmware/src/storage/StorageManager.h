@@ -68,6 +68,9 @@ class StorageManager {
   // index is built. `readingPath` gets the file actually read (.rsvp).
   bool openIndexedBookAtPath(const String &path, IndexedBookStore &store, BookMetadata &metadata,
                              String *readingPath = nullptr);
+  // Why the last book open failed ("SD write failed", "No readable words",
+  // "EPUB conversion failed", ...); empty when the last open went through.
+  const String &lastFailure() const { return lastFailure_; }
   // True if `path` is a current library entry, OR is the .rsvp cache
   // sibling of one (an EPUB's save points are keyed by its converted cache
   // path — see epubCacheRsvpPath() — so a returned .epub source needs to
@@ -111,4 +114,6 @@ class StorageManager {
   mutable std::vector<String> bookTitles_;
   mutable std::vector<bool> bookTitleRetried_;
   mutable std::vector<String> bookAuthors_;
+  void ensureMetadataSlots() const;
+  String lastFailure_;
 };

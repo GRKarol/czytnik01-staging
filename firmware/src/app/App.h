@@ -699,6 +699,8 @@ class App {
   void openChapterPickerForBook(size_t bookIndex);
   void selectChapterPickerItem(uint32_t nowMs);
   void openSavePointsList();
+  void openShelfSelectedBook(uint32_t nowMs);
+  size_t savePointCountForCurrentBook() const;
   void selectSavePointItem(uint32_t nowMs);
   void openSavePointDeleteConfirm(size_t index, uint32_t nowMs);
   void selectSavePointDeleteConfirmItem(uint32_t nowMs);
@@ -1513,6 +1515,7 @@ class App {
   bool nanoShelfDragging_ = false;
   // Touch that started on the title strip under the shelf (opens details).
   bool nanoShelfDetailTouch_ = false;
+  int nanoShelfPressedId_ = 0;  // shelf button drawn pressed (renderNanoShelf)
   bool nanoShelfMoved_ = false;
   uint32_t nanoShelfLastDragRenderMs_ = 0;
   // Chapter wheel: centered row, sub-row offset while dragging, drag origin
@@ -1613,6 +1616,9 @@ class App {
   std::vector<ChapterMarker> chapterMarkers_;
   std::vector<size_t> paragraphStarts_;
   std::vector<SavePoint> savePoints_;
+  // savePoints_ indices of the open book's bookmarks, in list order: the
+  // bookmark list only shows the book being read (Karol 17.10).
+  std::vector<size_t> savePointRows_;
   std::vector<String> savePointMenuItems_;
   size_t savePointSelectedIndex_ = 0;
   std::vector<String> savePointDeleteConfirmMenuItems_;
@@ -1698,6 +1704,9 @@ class App {
   bool lastReaderTapValid_ = false;
   bool bootButtonReleasedSinceBoot_ = false;
   bool bootButtonLongPressHandled_ = false;
+  // kMenuTouchQuietMs guard (App::handleTouch).
+  uint32_t menuTouchQuietUntilMs_ = 0;
+  bool menuTouchSwallowed_ = false;
   bool powerButtonReleasedSinceBoot_ = false;
   bool powerButtonLongPressHandled_ = false;
   bool powerTapPending_ = false;

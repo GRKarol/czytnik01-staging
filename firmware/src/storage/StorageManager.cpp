@@ -1777,6 +1777,22 @@ String fallbackBookTitle(const String &path) {
   return normalizeDisplayText(name);
 }
 
+// Title and author renamed in the Flower app (BookExtras names.txt, UTF-8)
+// over the book's own, in the reader's display encoding.
+void applyAppNames(const String &path, String &title, String &author) {
+  String ownTitle;
+  String ownAuthor;
+  if (!BookExtras::readNames(path, ownTitle, ownAuthor)) {
+    return;
+  }
+  if (!ownTitle.isEmpty()) {
+    title = normalizeDisplayText(ownTitle);
+  }
+  if (!ownAuthor.isEmpty()) {
+    author = normalizeDisplayText(ownAuthor);
+  }
+}
+
 // What the "Opening book" screens call a book: its @title when it has one
 // (the starter books are files named starter-en-1.rsvp and so on), the file
 // name without the extension otherwise.
@@ -2054,6 +2070,15 @@ void StorageManager::notifyStatus(const char *title, const char *line1, const ch
   Serial.printf("[storage-status] %d%% %s | %s | %s\n", progressPercent,
                 title == nullptr ? "" : title, line1 == nullptr ? "" : line1,
                 line2 == nullptr ? "" : line2);
+  const auto has = [](const char *text, const char *part) { return text != nullptr && strstr(text, part) != nullptr; };
+  if (progressPercent == 100) {
+    if (has(line1, "failed")) {
+      lastFailure_ = line1;
+    } else if (has(title, "failed") || has(title, "unsupported") || has(title, "too large") ||
+               has(line2, "EPUB missing")) {
+      lastFailure_ = (line2 != nullptr && line2[0] != '\0') ? line2 : title;
+    }
+  }
   if (statusCallback_ != nullptr) {
     statusCallback_(statusContext_, title, line1, line2, progressPercent);
   }
@@ -2155,16 +2180,32 @@ bool StorageManager::bookIsArticle(size_t index) const {
   return path.startsWith(String(kArticleFilesPath) + "/");
 }
 
+// Boot scans the card without reading the books' @title/@author lines
+// (refreshBookPaths(false)), so the title cache is empty until the library
+// is opened. Every name asked for before that came from the file name, and
+// a file name written before v0.4.13 has '-' for each Polish letter: the
+// Czytaj card showed "tysi--cu" until the library had been opened once.
+// Empty slots let the one-read retry below fill a book on first use.
+void StorageManager::ensureMetadataSlots() const {
+  if (bookTitles_.size() < bookPaths_.size()) {
+    bookTitles_.resize(bookPaths_.size());
+  }
+  if (bookAuthors_.size() < bookPaths_.size()) {
+    bookAuthors_.resize(bookPaths_.size());
+  }
+}
+
 String StorageManager::bookDisplayName(size_t index) const {
   const String path = bookPath(index);
   if (path.isEmpty()) {
     return "";
   }
+  ensureMetadataSlots();
 
   if (index < bookTitles_.size() && !bookTitles_[index].isEmpty()) {
     return bookTitles_[index];
   }
-  if (index < bookTitles_.size() && hasRsvpExtension(path)) {
+  if (index < bookTitles_.size()) {
     // The library scan can miss a title when the card is busy (starter books
     // still downloading): one more read, then the file name for good.
     if (bookTitleRetried_.size() != bookTitles_.size()) {
@@ -2172,7 +2213,11 @@ String StorageManager::bookDisplayName(size_t index) const {
     }
     if (!bookTitleRetried_[index]) {
       bookTitleRetried_[index] = true;
-      const RsvpDirectiveValues values = readRsvpDirectiveValues(path);
+      RsvpDirectiveValues values;
+      if (hasRsvpExtension(path)) {
+        values = readRsvpDirectiveValues(path);
+      }
+      applyAppNames(path, values.title, values.author);
       if (index < bookAuthors_.size() && bookAuthors_[index].isEmpty()) {
         bookAuthors_[index] = values.author;
       }
@@ -2192,7 +2237,12 @@ String StorageManager::bookAuthorName(size_t index) const {
     return "";
   }
 
-  if (index < bookAuthors_.size()) {
+  ensureMetadataSlots();
+  if (index < bookAuthors_.size() && bookAuthors_[index].isEmpty() &&
+      (bookTitleRetried_.size() != bookTitles_.size() || !bookTitleRetried_[index])) {
+    bookDisplayName(index);  // reads @title and @author once
+  }
+  if (index < bookAuthors_.size() && (!bookAuthors_[index].isEmpty() || !hasEpubExtension(path))) {
     return bookAuthors_[index];
   }
 
@@ -2420,6 +2470,7 @@ bool StorageManager::readIndexedMetadata(const String &path, BookMetadata &metad
   metadata.wordCount = header.wordCount;
   metadata.title = readRsvpDirectiveValue(path, "@title");
   metadata.author = readRsvpDirectiveValue(path, "@author");
+  applyAppNames(path, metadata.title, metadata.author);
   if (metadata.title.isEmpty()) {
     metadata.title = fallbackBookTitle(path);
   }
@@ -2771,6 +2822,7 @@ bool StorageManager::loadIndexedBook(size_t index, IndexedBookStore &store,
                                      size_t *loadedIndex, bool allowIndexBuild,
                                      bool allowEpubConversion) {
   metadata.clear();
+  lastFailure_ = "";
 
   if (!mounted_) {
     Serial.println("[storage] SD not mounted, cannot load indexed book");
@@ -3125,6 +3177,7 @@ bool StorageManager::deleteBookAtPath(const String &path) {
 bool StorageManager::openIndexedBookAtPath(const String &requestedPath, IndexedBookStore &store,
                                            BookMetadata &metadata, String *readingPath) {
   metadata.clear();
+  lastFailure_ = "";
   if (!mounted_) {
     return false;
   }
@@ -3284,6 +3337,7 @@ void StorageManager::rebuildBookMetadataCache() {
     } else if (hasEpubExtension(path)) {
       author = epubLibraryLabel(path);
     }
+    applyAppNames(path, title, author);
 
     bookTitles_.push_back(title);
     bookAuthors_.push_back(author);

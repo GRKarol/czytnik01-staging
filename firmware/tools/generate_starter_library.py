@@ -43,6 +43,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "sd_card_conver
 import convert_books as cb  # noqa: E402  (path must be set up first)
 
 MAX_WORDS = 0  # unlimited, same default as convert_books.py
+# Bump with every change that alters the books; must match
+# kStarterBookEdition in firmware/src/app/App.cpp. 2 = 17.10.2026: full
+# Wolne Lektury texts, no donation/footnote chapters, books without
+# chapters replaced.
+STARTER_EDITION = 2
 USER_AGENT = (
     "Mozilla/5.0 (compatible; czytnik01-starter-library-builder/1.0; "
     "+https://github.com/GRKarol/czytnik01)"
@@ -199,6 +204,13 @@ BOILERPLATE_HEADING_MARKERS = (
     "errata",
     "druckfehler",
     "objaśnienia",
+    # Dedications.
+    "dedicație",
+    "dedykacja",
+    "widmung",
+    "dédicace",
+    "dedicatoria",
+    "dedication",
 )
 # A table of contents printed as plain paragraphs: many short lines. Only
 # short sections qualify, so a long run of verse is never taken for one.
@@ -213,6 +225,10 @@ BOILERPLATE_MIN_WORDS = 60
 # word-count/heading checks still stop at the first substantial section, so a
 # book that's genuinely short throughout (a poetry collection) isn't gutted.
 BOILERPLATE_MAX_TRIM_SECTIONS = 20
+# Before the first real chapter a section this short is a title page, a
+# dedication ("An Adelbert von Chamisso.", "Par Maurice Leblanc") or a
+# licence note ("TASA" in Don Quijote), never a chapter of its own.
+FRONT_MATTER_MAX_WORDS = 150
 
 
 def _split_into_sections(
@@ -247,10 +263,15 @@ def _section_is_boilerplate(title: str | None, texts: list[str]) -> bool:
     word_count = sum(len(t.split()) for t in texts)
     if word_count < BOILERPLATE_MIN_WORDS:
         return True
+    # Short lines alone are verse too (the Epilog of Pan Tadeusz went as a
+    # "table of contents"); a printed contents list also ends its lines in
+    # page numbers.
+    numbered = sum(1 for t in texts if re.search(r"\d+\s*\.?$", t.strip()))
     return (
         len(texts) >= TOC_MIN_PARAGRAPHS
         and word_count <= TOC_MAX_WORDS
         and word_count / len(texts) < TOC_MAX_AVERAGE_WORDS
+        and numbered * 10 >= len(texts) * 3
     )
 
 
@@ -263,7 +284,10 @@ def trim_boilerplate_sections(events: list[tuple[str, str]]) -> list[tuple[str, 
     while (
         start < len(sections) - 1
         and start < BOILERPLATE_MAX_TRIM_SECTIONS
-        and _section_is_boilerplate(*sections[start])
+        and (
+            _section_is_boilerplate(*sections[start])
+            or sum(len(t.split()) for t in sections[start][1]) < FRONT_MATTER_MAX_WORDS
+        )
     ):
         start += 1
 
@@ -300,6 +324,28 @@ BOILERPLATE_INLINE_MARKERS = (
     "fundacja nowoczesna polska",
     "isbn-978-83-288",
 )
+
+
+# Wolne Lektury put a donation appeal ("fund0", "fund1", ... every few
+# chapters), the footnotes, their own closing page ("last") and a
+# "Wesprzyj Wolne Lektury!" page into the spine as sections of their own.
+# They go whole, before the inline cut below: the first appeal holds a
+# wolnelektury.pl link, and cutting there kept only the first 4 chapters
+# of "W pustyni i w puszczy" (Karol 17.10).
+WOLNE_LEKTURY_SECTION_RE = re.compile(r"^(fund\d+|last|przypisy:?|wesprzyj wolne lektury!?)$", re.IGNORECASE)
+
+
+def drop_wolne_lektury_sections(events: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    result: list[tuple[str, str]] = []
+    skipping = False
+    for kind, value in events:
+        if kind == "chapter":
+            skipping = bool(WOLNE_LEKTURY_SECTION_RE.match(value.strip()))
+            if skipping:
+                continue
+        if not skipping:
+            result.append((kind, value))
+    return result
 
 
 def truncate_at_first_inline_boilerplate(
@@ -410,7 +456,12 @@ FOOTNOTE_BODY_RE = re.compile(r"^\[\d{1,4}\]\s")
 FILE_CHAPTER_RE = re.compile(r"^\d{6,} \d+ h \d+\.htm$|\.x?html?$")
 
 
-def polish_events(events: list[tuple[str, str]]) -> list[tuple[str, str]]:
+# Wolne Lektury footnote anchors come out glued to the word they mark
+# ("Saidu1", "emirem4", chapter "Zaścianek370").
+GLUED_FOOTNOTE_RE = re.compile(r"(?<=[^\W\d_])\d{1,4}(?=[\s.,;:!?…\"”'»)\-—]|$)")
+
+
+def polish_events(events: list[tuple[str, str]], glued_footnotes: bool = False) -> list[tuple[str, str]]:
     """Drops footnote bodies and markers and file-name chapter titles: in a
     one-word-at-a-time reader "[192]" and "Giftkraut." between two sentences
     are just noise."""
@@ -419,13 +470,137 @@ def polish_events(events: list[tuple[str, str]]) -> list[tuple[str, str]]:
         if kind == "chapter":
             if FILE_CHAPTER_RE.search(value.strip()):
                 continue
+            value = GLUED_FOOTNOTE_RE.sub("", FOOTNOTE_MARK_RE.sub("", value).strip())
+            # The converter writes a middle dot as "*"; in a chapter name
+            # ("ZWEITES KAPITEL · ERSTE UNTERSUCHUNG") a dash reads better.
+            value = re.sub(r"\s*[·•∙]\s*", " - ", value)
             result.append((kind, value))
             continue
         if FOOTNOTE_BODY_RE.match(value):
             continue
         value = FOOTNOTE_MARK_RE.sub("", value).strip()
+        if glued_footnotes:
+            value = GLUED_FOOTNOTE_RE.sub("", value)
         if value:
             result.append((kind, value))
+    return result
+
+
+MAX_CHAPTER_TITLE_CHARS = 60
+# A "chapter" this short is a part heading with a page number or a picture
+# caption under it ("PART TWO-The Sea-cook" in Treasure Island): it goes
+# into the chapter after it instead of being a stop of its own.
+MIN_CHAPTER_WORDS = 25
+
+
+def _joined_title(first: str, second: str) -> str:
+    separator = " " if second.startswith("(") else " - "
+    joined = f"{first}{separator}{second}"
+    return joined if len(joined) <= MAX_CHAPTER_TITLE_CHARS else second
+
+
+def tidy_chapter_structure(events: list[tuple[str, str]], lang: str = "en") -> list[tuple[str, str]]:
+    """Every chapter the reader lists must be one a person would pick: a
+    heading with its subtitle ("Głucha przestrzeń (Ballada kolejowa)"), no
+    empty part headings, no end markers ("FIN DE CANDIDE.")."""
+    sections = _split_into_sections(events)
+    merged: list[tuple[str | None, list[str]]] = []
+    carry_title: str | None = None
+    carry_texts: list[str] = []
+    for title, texts in sections:
+        if carry_title is not None:
+            title = _joined_title(carry_title, title) if title is not None else carry_title
+            texts = carry_texts + texts
+            carry_title = None
+            carry_texts = []
+        words = sum(len(t.split()) for t in texts)
+        if title is not None and words < MIN_CHAPTER_WORDS:
+            carry_title = title
+            carry_texts = texts
+            continue
+        merged.append((title, texts))
+    # A short chapter left at the very end is an end marker: its few words
+    # go to the chapter before it.
+    if carry_title is not None and merged:
+        last_title, last_texts = merged[-1]
+        merged[-1] = (last_title, last_texts + carry_texts)
+
+    merged = number_restarting_parts(merged, lang)
+
+    result: list[tuple[str, str]] = []
+    for title, texts in merged:
+        if title is not None:
+            result.append(("chapter", title))
+        result.extend(("text", t) for t in texts)
+    return result
+
+
+ROMAN_RE = re.compile(r"^[IVXLC]+\.?$")
+PART_WORD = {"pl": "Tom", "en": "Part", "de": "Teil", "fr": "Partie", "es": "Parte", "ro": "Partea"}
+
+
+def number_restarting_parts(
+    sections: list[tuple[str | None, list[str]]], lang: str
+) -> list[tuple[str | None, list[str]]]:
+    """A book in volumes whose chapters start again at "I" in each one
+    ("Stara baśń": I-XI, I-X, I-IX, the volume headings lost in the EPUB)
+    gets the volume in front: "Tom 2 - III"."""
+    titles = [t for t, _ in sections if t is not None]
+    restarts = sum(
+        1 for prev, cur in zip(titles, titles[1:]) if cur.rstrip(".") == "I" and ROMAN_RE.match(prev)
+    )
+    if restarts == 0:
+        return sections
+    part = 1
+    previous: str | None = None
+    numbered: list[tuple[str | None, list[str]]] = []
+    for title, texts in sections:
+        if title is not None and ROMAN_RE.match(title):
+            if title.rstrip(".") == "I" and previous is not None and ROMAN_RE.match(previous):
+                part += 1
+            previous = title
+            title = f"{PART_WORD.get(lang, 'Part')} {part} - {title.rstrip('.')}"
+        elif title is not None:
+            previous = title
+        numbered.append((title, texts))
+    return numbered
+
+
+def apply_entry_fixes(events: list[tuple[str, str]], entry: dict) -> list[tuple[str, str]]:
+    """Hand fixes from the manifest for what no general rule catches:
+    "drop_sections" (heading regexes, the heading goes with its text),
+    "drop_leading_text" (a title page before the first heading),
+    "drop_text" (exact lines, e.g. the alt text left by illustrations)."""
+    drops = [re.compile(p, re.IGNORECASE) for p in entry.get("drop_sections", [])]
+    drop_text = set(entry.get("drop_text", []))
+    result: list[tuple[str, str]] = []
+    skipping = bool(entry.get("drop_leading_text"))
+    for kind, value in events:
+        if kind == "chapter":
+            skipping = any(d.search(value) for d in drops)
+            if skipping:
+                continue
+        if kind == "text" and drop_text:
+            if value.strip() in drop_text:
+                continue
+            first, _, rest = value.strip().partition(" ")
+            if first in drop_text and rest:
+                value = rest
+        if not skipping:
+            result.append((kind, value))
+    return result
+
+
+def rename_chapters(events: list[tuple[str, str]], entry: dict) -> list[tuple[str, str]]:
+    renames = [(re.compile(p), r) for p, r in entry.get("rename", [])]
+    if not renames:
+        return events
+    result: list[tuple[str, str]] = []
+    for kind, value in events:
+        if kind == "chapter":
+            for pattern, replacement in renames:
+                value = pattern.sub(replacement, value)
+        result.append((kind, value))
     return result
 
 
@@ -445,6 +620,7 @@ def build_one(entry: dict, tmp_dir: pathlib.Path, out_dir: pathlib.Path) -> None
         src_path.write_bytes(data)
         _, extracted_author, events = cb.epub_events_and_metadata(src_path)
         author = author or extracted_author
+        events = drop_wolne_lektury_sections(events)
         events = trim_boilerplate_sections(events)
         events = truncate_at_first_inline_boilerplate(events)
     elif kind == "wikisource":
@@ -459,9 +635,14 @@ def build_one(entry: dict, tmp_dir: pathlib.Path, out_dir: pathlib.Path) -> None
     else:
         raise ValueError(f"unknown source kind: {kind}")
 
-    events = polish_events(events)
-    events = drop_empty_chapter_runs(events)
+    events = polish_events(events, glued_footnotes="wolnelektury.pl" in url)
+    events = apply_entry_fixes(events, entry)
+    events = tidy_chapter_structure(events, lang)
+    events = rename_chapters(events, entry)
     writer = cb.RsvpWriter(title=title, author=author, source=url, max_words=MAX_WORDS)
+    # The reader keeps a starter book already on the card unless its
+    # edition is older than STARTER_EDITION (App::bookDownloadTask).
+    writer.lines.insert(writer.lines.index(""), f"@edition {STARTER_EDITION}")
     for event_kind, value in events:
         if event_kind == "chapter":
             writer.add_chapter(value)
@@ -542,7 +723,9 @@ MANIFEST: list[dict] = [
     {"lang": "en", "slot": 2, "kind": "epub", "url": _gutenberg(1342),
      "title": "Pride and Prejudice", "author": "Jane Austen"},
     {"lang": "en", "slot": 3, "kind": "epub", "url": _gutenberg(120),
-     "title": "Treasure Island", "author": "Robert Louis Stevenson"},
+     "title": "Treasure Island", "author": "Robert Louis Stevenson",
+     # List of illustrations and the "To the hesitating purchaser" poem.
+     "drop_sections": [r"^Illustrated by", r"^TREASURE ISLAND$"]},
     {"lang": "en", "slot": 4, "kind": "epub", "url": _gutenberg(345),
      "title": "Dracula", "author": "Bram Stoker"},
     {"lang": "en", "slot": 5, "kind": "epub", "url": _gutenberg(35),
@@ -562,7 +745,9 @@ MANIFEST: list[dict] = [
     {"lang": "fr", "slot": 5, "kind": "epub", "url": _gutenberg(2419),
      "title": "La dame aux camélias", "author": "Alexandre Dumas fils"},
     {"lang": "fr", "slot": 6, "kind": "epub", "url": _gutenberg(4650),
-     "title": "Candide", "author": "Voltaire"},
+     "title": "Candide", "author": "Voltaire",
+     # Title page and the 19th-century editor's preface, not Voltaire's.
+     "drop_leading_text": True, "drop_sections": [r"^Préface de l'Éditeur"]},
 
     # --- German (de) ---
     {"lang": "de", "slot": 1, "kind": "epub", "url": _gutenberg(29336),
@@ -571,16 +756,25 @@ MANIFEST: list[dict] = [
      "title": "Die Verwandlung", "author": "Franz Kafka"},
     {"lang": "de", "slot": 3, "kind": "epub", "url": _gutenberg(50285),
      "title": "Dr. Mabuse, der Spieler", "author": "Norbert Jacques"},
-    {"lang": "de", "slot": 4, "kind": "epub", "url": _gutenberg(74008),
-     "title": "Der Schimmelreiter", "author": "Theodor Storm"},
+    # Der Schimmelreiter runs as one piece with no chapters (Karol 17.10).
+    {"lang": "de", "slot": 4, "kind": "epub", "url": _gutenberg(17362),
+     "title": "Der goldene Topf", "author": "E. T. A. Hoffmann"},
     {"lang": "de", "slot": 5, "kind": "epub", "url": _gutenberg(31538),
-     "title": "Peter Schlemihls wundersame Geschichte", "author": "Adelbert von Chamisso"},
+     "title": "Peter Schlemihls wundersame Geschichte", "author": "Adelbert von Chamisso",
+     # A closing dedication, an "Ende." page and the publisher's list after
+     # chapter 11; the bare title heading in front of chapter 1.
+     "drop_sections": [r"^An Adelbert von Chamisso", r"^Ende", r"^Peter Schlemihls wundersame Geschichte"]},
     {"lang": "de", "slot": 6, "kind": "epub", "url": _gutenberg(77905),
-     "title": "Deutsche Märchen", "author": "Brüder Grimm"},
+     "title": "Deutsche Märchen", "author": "Brüder Grimm",
+     # Every illustration left its alt text "deko" as a paragraph.
+     "drop_text": ["deko"]},
 
     # --- Spanish (es) ---
     {"lang": "es", "slot": 1, "kind": "epub", "url": _gutenberg(2000),
-     "title": "Don Quijote de la Mancha", "author": "Miguel de Cervantes"},
+     "title": "Don Quijote de la Mancha", "author": "Miguel de Cervantes",
+     # The licences, errata and approvals printed in front of both parts.
+     "drop_sections": [r"^por Miguel de Cervantes", r"TASA$", r"ERRATAS", r"^EL REY$",
+                       r"^APROBACI", r"^DEDICATORIA", r"^AL DUQUE DE B"]},
     {"lang": "es", "slot": 2, "kind": "epub", "url": _gutenberg(13507),
      "title": "Cuentos de amor, de locura y de muerte", "author": "Horacio Quiroga"},
     {"lang": "es", "slot": 3, "kind": "epub", "url": _gutenberg(26983),
@@ -597,10 +791,12 @@ MANIFEST: list[dict] = [
      "title": "Amintiri din copilărie", "author": "Ion Creangă"},
     {"lang": "ro", "slot": 2, "kind": "wikisource", "url": "Moara cu noroc",
      "title": "Moara cu noroc", "author": "Ioan Slavici"},
-    {"lang": "ro", "slot": 3, "kind": "wikisource", "url": "Povestea lui Harap-Alb",
-     "title": "Povestea lui Harap-Alb", "author": "Ion Creangă"},
-    {"lang": "ro", "slot": 4, "kind": "wikisource", "url": "Sărmanul Dionis",
-     "title": "Sărmanul Dionis", "author": "Mihai Eminescu"},
+    # Harap-Alb and Sărmanul Dionis have no chapters at all: the reader's
+    # chapter list stayed one entry long (Karol 17.10).
+    {"lang": "ro", "slot": 3, "kind": "wikisource", "url": "Mara",
+     "title": "Mara", "author": "Ioan Slavici"},
+    {"lang": "ro", "slot": 4, "kind": "wikisource", "url": "Ciocoii vechi și noi",
+     "title": "Ciocoii vechi și noi", "author": "Nicolae Filimon"},
     {"lang": "ro", "slot": 5, "kind": "wikisource", "url": "Ion (Rebreanu)",
      "title": "Ion", "author": "Liviu Rebreanu"},
     {"lang": "ro", "slot": 6, "kind": "epub", "url": _gutenberg(64597),
@@ -611,11 +807,15 @@ MANIFEST: list[dict] = [
      "title": "W pustyni i w puszczy", "author": "Henryk Sienkiewicz"},
     {"lang": "pl", "slot": 2, "kind": "epub", "url": _wolnelektury("dolega-mostowicz-prokurator-alicja-horn"),
      "title": "Prokurator Alicja Horn", "author": "Tadeusz Dołęga-Mostowicz"},
-    {"lang": "pl", "slot": 3, "kind": "epub", "url": _wolnelektury("trylogia-ksiezycowa-na-srebrnym-globie"),
-     "title": "Na srebrnym globie", "author": "Jerzy Żuławski"},
+    # Na srebrnym globie: its first part is a 32 000-word diary with no
+    # chapters, so it was swapped for a novel split all the way through.
+    {"lang": "pl", "slot": 3, "kind": "epub", "url": _wolnelektury("stara-basn"),
+     "title": "Stara baśń", "author": "Józef Ignacy Kraszewski"},
     {"lang": "pl", "slot": 4, "kind": "epub", "url": _wolnelektury("demon-ruchu"),
      "title": "Demon ruchu", "author": "Stefan Grabiński"},
-    {"lang": "pl", "slot": 5, "kind": "epub", "url": _gutenberg(31536),
+    # Wolne Lektury rather than Gutenberg 31536, which has the first five
+    # books only, with page numbers and its contents list in the text.
+    {"lang": "pl", "slot": 5, "kind": "epub", "url": _wolnelektury("pan-tadeusz"),
      "title": "Pan Tadeusz", "author": "Adam Mickiewicz"},
     {"lang": "pl", "slot": 6, "kind": "epub", "url": _gutenberg(8119),
      "title": "Sklepy cynamonowe", "author": "Bruno Schulz"},

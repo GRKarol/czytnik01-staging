@@ -300,7 +300,7 @@ inline const char *trKey3Lookup(uint8_t keyIndex, uint8_t langIndex) {
 }
 
 inline const char *trKey4Lookup(uint8_t keyIndex, uint8_t langIndex) {
-  static const char *const kTable[181][6] = {
+  static const char *const kTable[183][6] = {
       {"Battery indicator: ", "Indicador de bater\xED""a: ", "Indicateur batterie : ", "Akkuanzeige: ", "Indicator baterie: ", "Wska\xB3""nik baterii: "},  // BatteryStyleColon
       {"Icon + %", "Icono + %", "Ic\xF4""ne + %", "Symbol + %", "Pictogram\x8B"" + %", "Ikona + %"},  // BatteryStyleIconPercent
       {"Number in icon", "N\xFA""mero en icono", "Chiffre dans l'ic\xF4""ne", "Zahl im Symbol", "Num\x8B""r \xEE""n pictogram\x8B""", "Liczba w ikonie"},  // BatteryStyleNumberInIcon
@@ -482,6 +482,8 @@ inline const char *trKey4Lookup(uint8_t keyIndex, uint8_t langIndex) {
       {"Side", "Lado", "C\xF4""t\xE9""", "Seite", "Parte", "Strona"},  // GuideSideShort
       {"Full stops", "Puntos", "Points", "Satzende", "Puncte", "Kropki"},  // PacingSentences
       {"Wi-Fi with the screen off: ", "Wi-Fi con la pantalla apagada: ", "Wi-Fi \xE9""cran \xE9""teint : ", "WLAN bei aus. Bildschirm: ", "Wi-Fi cu ecranul stins: ", "Wi-Fi przy zgaszonym ekranie: "},  // WifiScreenOffColon
+      {"Options", "Opciones", "Options", "Optionen", "Op\x8F""iuni", "Opcje"},  // BookOptions
+      {"Pink", "Rosa", "Rose", "Rosa", "Roz", "R\xF3""\xB5""owy"},  // ColorPink
   };
   return kTable[keyIndex][langIndex];
 }

@@ -1,97 +1,60 @@
 # Roadmap
 
-Plan dalszej pracy. Lista, nie kontrakt — układ ma sens dopiero po
-przemyśleniu z klientem hardware'u.
+Stan na 2026-10-13. Lista, nie kontrakt.
 
-## Faza 0 — Podkładka (✅ done)
+## Zrobione
 
-- [x] Wipe starego repo, orphan branch.
-- [x] Scaffold Vite + TS + Lit + vite-plugin-pwa.
-- [x] Strona flashera z esp-web-tools, manifest `public/firmware/manifest.json`.
-- [x] Stub PWA klienta.
-- [x] CI: build + auto-deploy na GitHub Pages.
-- [x] Dokumentacja architektury, flow QR.
+- Firmware: kreator pierwszego uruchomienia (12 kroków), motywy menu/czytania,
+  RSVP + przewijanie strony z osobnymi opóźnieniami (długie słowa, złożoność,
+  przecinki, kropki), prowadnica lewa/prawa, wygaszacz ekranu z etapem
+  przyciemnienia i potwierdzeniem wyłączenia, przyciski PWR/prawy
+  przeprogramowane (lewy fizyczny = RESET na pinie EN, nieprogramowalny
+  sprzętowo).
+- Czcionki na karcie SD: loader z `SD_MMC`, ~20 fontów z pełnym pokryciem
+  polskich/czeskich/rumuńskich/niemieckich/francuskich znaków, paczka
+  `fonts-pack` pobiera się sama przez Wi-Fi z GitHub Release (bez PWA, bez
+  BLE) — patrz `docs/PLAN_FONTY_NA_SD.md`. Pozostaje tylko weryfikacja na
+  sprzęcie (czas otwarcia ekranu wyboru, przełączanie fontu, fallback
+  Atkinson przy braku karty).
+- Flasher (`grkarol.github.io/czytnik01`): ESP Web Tools + WebSerial, krok
+  przygotowania nowej karty SD (format + wgranie czcionek przez kabel).
+- OTA: firmware sam odpytuje GitHub Releases i aktualizuje się przez Wi-Fi
+  (`firmware/src/update/OtaUpdater.cpp`) — nie przez przeglądarkę.
+- Pluginy: wbudowane w firmware (`firmware/src/plugins/builtin/`), włączane
+  lokalnie z poziomu menu (Aktywne/Biblioteka/Detail, NVS), bez instalacji
+  paczek ZIP z sieci.
+- Aplikacja mobilna Flower (Capacitor/Android, `app/` + `android/` w tym
+  repo): synchronizacja biblioteki z czytnikiem przez
+  `firmware/src/sync/CompanionSyncManager.cpp` po Wi-Fi, nie przez przeglądarkę.
+  Wydania na `flower.theworkpc.com/appdownload`
+  (repo `GRKarol/FlowerSite.github.io`).
 
-## Faza 1 — Rebrand + nowy transport (✅ done w tej rundzie)
+## Zarzucone / zastąpione innym podejściem
 
-- [x] Skopiowano firmware z `ionutdecebal/rsvpnano` do `firmware/`.
-- [x] Wymiana abstrakcji urządzenia: `DeviceLink` + 3 implementacje:
-      `WifiLink` (główny, HTTP+WS), `BluetoothLink` (bonus Androida),
-      `SerialLink` (tryb advanced/diagnostyczny).
-- [x] Rebrand: motyw **Flower** — jasnoniebieskie niebo, kwiatkowe akcenty,
-      książkowa serif typografia, kwiatkowe logo.
-- [x] 6 ekranów aplikacji (na razie szkielety): Start, Książki, Konwerter,
-      Pluginy, Aktualizacje, Więcej.
-- [x] Wybór połączenia jako wizard (WiFi / Bluetooth / USB advanced).
-- [x] Sklep pluginów: `public/plugins/index.json` z 3 wpisami
-      (Klepsydra gotowa, Dyktafon i Muzyka planowane).
+Pierwotny plan (Faza 2-4 w starej wersji tego pliku) zakładał PWA w
+przeglądarce jako główny klient: konwerter `.epub`/`.pdf`/`.mobi` w
+przeglądarce, bibliotekę i pluginy przez HTTP API urządzenia, sprawdzanie OTA
+z poziomu PWA, wizard onboardingowy w PWA. W praktyce projekt poszedł inną
+drogą:
 
-## Faza 2 — Logika ekranów aplikacji (TO JEST NASTĘPNIE)
+- Klientem jest natywna apka Android (Capacitor), nie PWA w przeglądarce.
+- Kreator pierwszego uruchomienia jest w firmware, na ekranie czytnika, nie
+  w przeglądarce.
+- OTA i pobieranie fontów firmware robi samodzielnie przez Wi-Fi, bez
+  pośrednictwa klienta.
+- Pluginy są wbudowane w firmware, nie instalowane jako paczki z sieci.
 
-### 2.1 Konwerter formatów (w przeglądarce)
+PWA/flasher na `grkarol.github.io/czytnik01` zostaje tylko do pierwszego
+flashowania urządzenia (ESP Web Tools), nie jako platforma klienta.
 
-Wsparcie dla każdego źródła, wyjście zawsze `.rsvp`:
+## Otwarte
 
-- [ ] `.txt` / `.md` / `.html` — trywialne, parser stringów.
-- [ ] `.epub` — biblioteka `epubjs` lub własny parser z `jszip`.
-- [ ] `.pdf` — `pdf.js`, wyciągamy text layer.
-- [ ] `.mobi` / `.azw` — `kindleunpack-js` lub konwersja przez wewnętrzny EPUB.
-- [ ] Drag-and-drop + file picker (mobilne też!).
-- [ ] Edytor metadanych (tytuł, autor) przed konwersją.
-- [ ] Lokalna pamięć podręczna skonwertowanych książek (IndexedDB).
-
-### 2.2 Biblioteka
-
-- [ ] Pobieranie listy książek z urządzenia (`GET /api/library`).
-- [ ] Upload książki (`POST /api/library` multipart).
-- [ ] Usuwanie, zmiana kolejności, kategoryzacja.
-
-### 2.3 Pluginy
-
-- [ ] Pobieranie listy z `public/plugins/index.json`.
-- [ ] Pobieranie paczki `.zip` przez `fetch`.
-- [ ] Wysyłka na urządzenie (`POST /api/plugins/install`).
-- [ ] Lista zainstalowanych pluginów na urządzeniu + usuwanie.
-
-### 2.4 Aktualizacje firmware
-
-- [ ] Sprawdzanie GitHub Releases (`OTA_RELEASES_API` w configu).
-- [ ] Porównanie z aktualną wersją na urządzeniu.
-- [ ] Pobranie `.bin` i wysyłka na urządzenie (`POST /api/ota`).
-- [ ] Pasek postępu, retry on fail.
-
-## Faza 3 — Firmware: dodanie API WiFi/BT
-
-Decyzje do podjęcia z Karolem:
-
-- [ ] Rebrand stringów RSVP Nano → Flower w `firmware/src/`.
-- [ ] WiFi mode dla aplikacji: AP-only, czy konfigurowalny (AP + STA)?
-- [ ] HTTP API: jakie endpointy (`/api/hello`, `/api/library`, `/api/cmd`,
-      `/api/ota`, `/api/plugins/*`).
-- [ ] WebSocket dla eventów real-time.
-- [ ] BLE GATT: definicja serwisu (UUID już w configu), charakterystyki
-      CMD/EVENT.
-- [ ] Plugin runtime: jak ładujemy paczki ZIP, gdzie trzymamy na SD,
-      jak firmware je czyta / włącza w menu.
-- [ ] OTA: integracja z `firmware/src/update/OtaUpdater.cpp` —
-      retarget endpointa z rsvpnano na nasz GitHub Releases.
-
-## Faza 4 — Onboarding / dystrybucja
-
-- [ ] Pierwszorazowy wizard po pobraniu PWA (3 ekrany: cześć / połącz /
-      gotowe).
-- [ ] Detekcja iOS — dodatkowa podpowiedź "Dodaj do ekranu głównego"
-      z ikonografią Share Sheet.
-- [ ] Generator etykiet QR na pudełka (skrypt w `firmware/tools/`?).
-- [ ] Domena własna (np. `flower.app` / `app.flower.pl`).
-- [ ] Sygnowanie firmware (opcjonalnie, dla anti-tampering).
-
-## Otwarte pytania
-
-- Czy konwerter ma robić batch (wiele plików naraz)?
-- Czy biblioteka na urządzeniu ma kategorie / tagi, czy płaska lista?
-- Plugin "Klepsydra" już jest jako `firmware/src/timer/FocusTimer.cpp` —
-  decyzja: zostaje wbudowany i plugin tylko go włącza, czy wyrzucamy
-  z firmware i dystrybuujemy wyłącznie jako paczkę plugin?
-- Jak nazywamy paczki pluginów w UI — "Pluginy", "Rozszerzenia",
-  "Dodatki", coś jeszcze?
+- Weryfikacja na sprzęcie v0.4.13: przyciski PWR/prawy, Wi-Fi przy zgaszonym
+  ekranie, polskie litery w Atkinson/OpenDyslexic, opóźnienia w trybie
+  strony, podgląd czcionki w kreatorze, krok przygotowania karty SD we
+  flasherze.
+- Weryfikacja na sprzęcie etapu 6 z `PLAN_FONTY_NA_SD.md` (ekran wyboru
+  fontu przy ~20 pozycjach).
+- Lewy przycisk fizyczny: decyzja o przelutowaniu z pinu EN na wolny GPIO,
+  jeśli ma dostać własną funkcję w UI. Czeka na zdjęcia PCB albo model
+  urządzenia.

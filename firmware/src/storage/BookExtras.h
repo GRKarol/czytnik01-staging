@@ -54,6 +54,14 @@ bool removeChapters(const String &bookPath);
 // when the book has one; markers past the end of the book are dropped.
 void applyChapters(const String &bookPath, BookMetadata &metadata);
 
+// Title and author set in the Flower app over the ones in the file
+// (names.txt: "FNM1", then the title line and the author line, UTF-8). An
+// empty field keeps the file's own. readNames() leaves the arguments alone
+// when the book has no names file.
+bool readNames(const String &bookPath, String &title, String &author);
+bool writeNames(const String &bookPath, const String &title, const String &author);
+bool removeNames(const String &bookPath);
+
 // Book deleted: its folder goes to the archive. Book back: folder returns.
 void archive(const String &bookPath);
 bool restore(const String &bookPath);

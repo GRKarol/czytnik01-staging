@@ -9,6 +9,7 @@ type Entry = Partial<Record<L, string>> & { en: string };
 import { LIBRARY_STRINGS } from "./strings-library";
 import { SETTINGS_STRINGS } from "./strings-settings";
 import { MISC_STRINGS } from "./strings-misc";
+import { SHARE_STRINGS } from "./strings-share";
 
 const APP_STRINGS: Record<string, Entry> = {
   // ─── Common ────────────────────────────────────────────────────────────
@@ -328,6 +329,7 @@ export const STRINGS: Record<string, Entry> = {
   ...LIBRARY_STRINGS,
   ...SETTINGS_STRINGS,
   ...MISC_STRINGS,
+  ...SHARE_STRINGS,
 };
 
 export type { Entry as StringEntry };

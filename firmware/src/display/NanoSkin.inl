@@ -1016,6 +1016,10 @@ int DisplayManager::nanoTypefaceTextWidth(const String &text, uint8_t scalePerce
   return width;
 }
 
+int DisplayManager::nanoTypefaceTextHeight(uint8_t scalePercent) const {
+  return scaledPercentDimension(std::max(1, baseGlyphHeightForTypeface(currentReaderTypeface())), scalePercent);
+}
+
 void DisplayManager::nanoTypefaceText(int x, int y, const String &text, uint16_t color, uint8_t scalePercent,
                                       ReaderTypeface typeface) {
   const ReaderTypeface previous = gButtonLabelPreviewTypeface;

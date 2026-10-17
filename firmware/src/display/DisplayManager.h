@@ -477,6 +477,8 @@ class DisplayManager {
                         ReaderTypeface typeface = ReaderTypeface::Count);
   int nanoTypefaceTextWidth(const String &text, uint8_t scalePercent,
                             ReaderTypeface typeface = ReaderTypeface::Count) const;
+  // Height of the glyph box nanoTypefaceText() draws at `scalePercent`.
+  int nanoTypefaceTextHeight(uint8_t scalePercent) const;
   // The reading position as the reader will show it: the current word with
   // its focus letter in the accent, anchored where the reading screen
   // anchors it, the neighbouring words dimmed. `area` spans the full width
@@ -754,7 +756,7 @@ class DisplayManager {
   uint8_t brightnessPercent_ = 100;
   PhraseLocalizer phraseLocalizer_ = nullptr;
   void *phraseLocalizerContext_ = nullptr;
-  uint8_t focusColorIndex_ = 1;  // 0=red, 1=blue, 2=green, 3=yellow, 4=orange, 5=purple, kFocusColorCustom
+  uint8_t focusColorIndex_ = 1;  // 0=red, 1=blue, 2=green, 3=yellow, 4=orange, 5=purple, 6=pink, kFocusColorCustom
   uint16_t customFocusColor_ = 0x001F;
   bool darkMode_ = true;
   bool nightMode_ = false;

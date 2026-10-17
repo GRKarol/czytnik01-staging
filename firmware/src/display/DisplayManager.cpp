@@ -73,6 +73,7 @@ constexpr uint16_t kFocusColorPalette[] = {
     0xFFE0,  // yellow
     0xFD20,  // orange
     0xA01F,  // purple
+    0xFA74,  // pink
 };
 constexpr uint16_t kNightFocusColorPalette[] = {
     0xFA80,  // red (warm)
@@ -81,6 +82,7 @@ constexpr uint16_t kNightFocusColorPalette[] = {
     0xFEA0,  // yellow (warm)
     0xFC80,  // orange (warm)
     0x9817,  // purple (muted)
+    0xE393,  // pink (muted)
 };
 constexpr size_t kFocusColorCount = sizeof(kFocusColorPalette) / sizeof(kFocusColorPalette[0]);
 constexpr uint16_t kDarkMenuDimColor = 0x8410;

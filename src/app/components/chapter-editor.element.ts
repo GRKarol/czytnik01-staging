@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { deviceApi, type BookParagraph, type ChapterMark } from "../device/api";
 import { onLangChange, tr } from "../i18n/index";
+import { icons } from "../ui/icons";
 
 type Filter = "all" | "chapters" | "suggested";
 
@@ -163,11 +164,11 @@ export class ChapterEditor extends LitElement {
     return html`
       <div class="sheet" role="dialog" aria-label=${tr("lib.chapters")}>
         <header>
-          <div>
+          <button class="icon back" @click=${this.close} aria-label=${tr("common.back")}>${icons.chevronLeft()}</button>
+          <div class="title">
             <small>${tr("lib.chapters")} · ${this.custom ? tr("ch.custom") : tr("ch.detected")}</small>
             <strong>${this.bookTitle || this.bookName}</strong>
           </div>
-          <button class="icon" @click=${this.close} aria-label=${tr("common.close")}>✕</button>
         </header>
 
         ${this.loading
@@ -434,17 +435,23 @@ export class ChapterEditor extends LitElement {
       position: sticky;
       top: 0;
       z-index: 2;
-      padding: 14px 0 6px;
+      /* Below the phone's status bar (edge-to-edge Android draws under it). */
+      padding: calc(14px + var(--safe-top, 0px)) 0 6px;
       background: var(--paper, #f8f4ec);
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
     }
-    header div {
+    header .title {
+      flex: 1 1 auto;
       display: flex;
       flex-direction: column;
       min-width: 0;
+    }
+    .icon.back {
+      display: grid;
+      place-items: center;
     }
     header small {
       font: 600 0.7rem var(--mn);
@@ -691,7 +698,7 @@ export class ChapterEditor extends LitElement {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      padding: 10px 0 calc(12px + env(safe-area-inset-bottom));
+      padding: 10px 0 calc(12px + var(--safe-bottom, env(safe-area-inset-bottom, 0px)));
       background: var(--paper, #f8f4ec);
       border-top: 1px solid var(--line);
       margin-top: auto;

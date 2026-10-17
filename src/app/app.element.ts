@@ -28,6 +28,7 @@ import "./components/tutorial-wizard.element";
 import "./components/qr-scanner.element";
 import {
   deviceApi,
+  offlineDeviceApi,
   onDeviceApiChange,
   setDeviceApi,
   type Book,
@@ -35,6 +36,8 @@ import {
   type DeviceSettings,
 } from "./device/api";
 import { HttpDeviceApi } from "./device/http-api";
+import { hasSnapshot, snapshotTimeLabel } from "./device/snapshot";
+import { listenForIncomingBooks } from "./books/book-transfer";
 import { getTutorialStatus } from "./onboarding/onboarding-store";
 import { followReaderLang, getLang, onLangChange, tr } from "./i18n/index";
 import { deviceLangToSupported } from "./i18n/lang-map";
@@ -211,7 +214,8 @@ export class CzytnikApp extends LitElement {
     } catch {
       this.setDevMode(false);
     }
-    if (this.onReader) void this.loadOverview();
+    // Without a reader: the last state it was seen in (device/snapshot.ts).
+    void this.loadOverview();
   }
 
   /** Plugins is a tab of the reader's advanced mode only. */
@@ -249,67 +253,21 @@ export class CzytnikApp extends LitElement {
     }
   }
 
-  /** Web Share Target: a file shared to the app goes to the reader. */
-  private async handleSharedFile(): Promise<void> {
+  /**
+   * A book from a friend: the PWA's share target and Android's "Share to
+   * Flower" / "Open with Flower" both put it in the library's inbox
+   * (books/book-transfer.ts), which sends it on to the reader.
+   */
+  private handleSharedFile(): void {
     const params = new URLSearchParams(window.location.search);
-    const sharedId = params.get("shared");
-    if (!sharedId) return;
-    const url = new URL(window.location.href);
-    url.searchParams.delete("shared");
-    window.history.replaceState(null, "", url.toString());
-    this.view = "library";
-    try {
-      const entry = await this.readSharedFileFromDb(sharedId);
-      if (!entry) return;
-      const file = entry.file as File;
-      const name = (entry.name as string) || file.name;
-      await deviceApi.uploadBook(file, name);
-      await this.removeSharedFileFromDb(sharedId);
-    } catch (err) {
-      this.error = tr("share.err", { error: err instanceof Error ? err.message : String(err) });
+    if (params.get("shared")) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("shared");
+      window.history.replaceState(null, "", url.toString());
+      this.view = "library";
     }
-  }
-
-  private readSharedFileFromDb(id: string): Promise<Record<string, unknown> | null> {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open("flower-share", 1);
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains("pending-files")) db.createObjectStore("pending-files");
-      };
-      request.onsuccess = () => {
-        const db = request.result;
-        const get = db.transaction("pending-files", "readonly").objectStore("pending-files").get(id);
-        get.onsuccess = () => {
-          db.close();
-          resolve(get.result ?? null);
-        };
-        get.onerror = () => {
-          db.close();
-          reject(get.error);
-        };
-      };
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  private removeSharedFileFromDb(id: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open("flower-share", 1);
-      request.onsuccess = () => {
-        const db = request.result;
-        const tx = db.transaction("pending-files", "readwrite");
-        tx.objectStore("pending-files").delete(id);
-        tx.oncomplete = () => {
-          db.close();
-          resolve();
-        };
-        tx.onerror = () => {
-          db.close();
-          reject(tx.error);
-        };
-      };
-      request.onerror = () => reject(request.error);
+    void listenForIncomingBooks(() => this.switchView("library"), (err) => {
+      this.error = tr("share.err", { error: err instanceof Error ? err.message : String(err) });
     });
   }
 
@@ -412,6 +370,37 @@ export class CzytnikApp extends LitElement {
     return html`
       ${!this.connected ? this.renderConnectChoice() : this.renderConnectedHome()}
       ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
+      ${!this.connected && !this.chosenTransport ? this.renderLastState() : nothing}
+    `;
+  }
+
+  /** Not connected: what the reader had the last time the app saw it. */
+  private renderLastState() {
+    if (!hasSnapshot()) return nothing;
+    const current = this.books.find((b) => b.current);
+    const title = current ? current.title || current.name.replace(/^.*\//, "").replace(/\.[^.]+$/, "") : "";
+    return html`
+      <section class="now">
+        <span class="section-title">${tr("home.lastState", { time: snapshotTimeLabel() })}</span>
+        ${current
+          ? html`<button class="now-card" @click=${() => this.switchView("library")}>
+              <span
+                class="cover"
+                style=${this.currentCover
+                  ? `background-image:url(${this.currentCover})`
+                  : `background:${readerCoverColor(current.name)}`}
+                >${this.currentCover ? nothing : readerInitials(title)}</span
+              >
+              <span class="now-text">
+                <strong>${title}</strong>
+                <small>${current.author || tr("common.unknownAuthor")}</small>
+                <span class="progress"><span style="width:${current.progressPercent ?? 0}%"></span></span>
+                <small class="pct">${tr("home.read", { n: current.progressPercent ?? 0 })}</small>
+              </span>
+            </button>`
+          : nothing}
+        <p class="muted">${tr("home.lastState.note", { n: this.books.length })}</p>
+      </section>
     `;
   }
 
@@ -683,8 +672,7 @@ export class CzytnikApp extends LitElement {
     this.books = [];
     this.info = null;
     this.view = "home";
-    const { MockDeviceApi } = await import("./device/api");
-    setDeviceApi(new MockDeviceApi());
+    setDeviceApi(offlineDeviceApi());
   };
 
   /**
@@ -726,8 +714,7 @@ export class CzytnikApp extends LitElement {
     this.books = [];
     this.info = null;
     this.error = tr("connect.err.lost");
-    const { MockDeviceApi } = await import("./device/api");
-    setDeviceApi(new MockDeviceApi());
+    setDeviceApi(offlineDeviceApi());
   };
 
   // ─── Styles ──────────────────────────────────────────────────────────────

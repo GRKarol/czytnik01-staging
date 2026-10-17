@@ -3,8 +3,12 @@ package pl.flower.reader;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
+import android.util.Log;
 
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -18,6 +22,10 @@ import androidx.work.WorkManager;
 
 import com.getcapacitor.BridgeActivity;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends BridgeActivity {
@@ -41,7 +49,22 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void handleShareIntent(Intent intent, boolean live) {
-        if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) {
+        if (intent == null) {
+            return;
+        }
+        // A book file from a friend: shared to Flower from a messenger or
+        // mail ("Udostępnij"), or opened with it ("Otwórz w Flower").
+        Uri stream = null;
+        if (Intent.ACTION_VIEW.equals(intent.getAction())) {
+            stream = intent.getData();
+        } else if (Intent.ACTION_SEND.equals(intent.getAction())) {
+            stream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+        }
+        if (stream != null) {
+            handleIncomingFile(stream, intent.getType(), live);
+            return;
+        }
+        if (!Intent.ACTION_SEND.equals(intent.getAction())) {
             return;
         }
         String type = intent.getType();
@@ -57,6 +80,54 @@ public class MainActivity extends BridgeActivity {
         } else {
             ShareTargetPlugin.stashPending(text);
         }
+    }
+
+    /** Copies the file into the app's cache; the web side picks it up there. */
+    private void handleIncomingFile(Uri uri, String mime, boolean live) {
+        String name = displayName(uri);
+        File dir = new File(getCacheDir(), "incoming");
+        if (!dir.exists() && !dir.mkdirs()) {
+            return;
+        }
+        File target = new File(dir, System.currentTimeMillis() + "-" + name.replaceAll("[\\\\/:*?\"<>|]", "_"));
+        try (InputStream in = getContentResolver().openInputStream(uri);
+             OutputStream out = new FileOutputStream(target)) {
+            if (in == null) {
+                return;
+            }
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) > 0) {
+                out.write(buffer, 0, read);
+            }
+        } catch (Exception e) {
+            Log.w("Flower", "incoming file failed: " + e);
+            return;
+        }
+        String path = Uri.fromFile(target).toString();
+        if (live) {
+            ShareTargetPlugin.deliverFileLive(path, name, mime);
+        } else {
+            ShareTargetPlugin.stashFile(path, name, mime);
+        }
+    }
+
+    private String displayName(Uri uri) {
+        String name = null;
+        if ("content".equals(uri.getScheme())) {
+            try (Cursor cursor = getContentResolver().query(
+                    uri, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    name = cursor.getString(0);
+                }
+            } catch (Exception ignored) {
+                // the last path segment below
+            }
+        }
+        if (name == null || name.trim().isEmpty()) {
+            name = uri.getLastPathSegment();
+        }
+        return name == null || name.trim().isEmpty() ? "book" : name;
     }
 
     private void requestNotificationPermissionIfNeeded() {

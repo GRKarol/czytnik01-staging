@@ -188,6 +188,10 @@ struct ShelfGeometry {
   Rect header;
   Rect viewport;
   Rect detail;
+  // The two buttons at the right end of the detail strip: open the book on
+  // the reader panel, and its options page (chapters, restart, delete).
+  Rect readButton;
+  Rect optionsButton;
   int marker = 0;
 };
 ShelfGeometry shelfGeometry();
@@ -198,6 +202,9 @@ size_t shelfSpineIndexAt(int32_t contentX, size_t count);
 int32_t shelfSpineLeft(size_t index);
 int shelfSpineWidth(size_t index);
 constexpr int kShelfDragThreshold = 20;
+// Ids the shelf's two buttons flash under (App handles their taps itself).
+constexpr int kShelfReadId = 9001;
+constexpr int kShelfOptionsId = 9002;
 
 struct ShelfBook {
   String title;
@@ -213,6 +220,9 @@ struct ShelfView {
   String detailAuthor;
   String detailStatus;
   String detailPercent;
+  String readLabel;
+  String optionsLabel;
+  int pressedId = 0;  // kShelfReadId / kShelfOptionsId while tapped
   String emptyLabel;
 };
 void paintShelf(DisplayManager &d, Sink &sink, const ShelfView &view);
