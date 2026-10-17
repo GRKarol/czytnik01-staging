@@ -79,7 +79,10 @@ def base_ascii_fallback(codepoint: int) -> str:
 
 
 def load_font(ttf_path: pathlib.Path, point_size: int) -> ImageFont.FreeTypeFont:
-    font = ImageFont.truetype(str(ttf_path), point_size)
+    # One glyph at a time needs no shaping. BASIC also matches a Windows
+    # Pillow without libraqm, and CI's raqm started failing (raqm_layout()
+    # failed, Oct 2026) on some glyphs.
+    font = ImageFont.truetype(str(ttf_path), point_size, layout_engine=ImageFont.Layout.BASIC)
     # Variable fonts: weight 400, other axes at their defaults. The old
     # set_variation_by_name("Regular") never matched (Pillow lists names as
     # bytes) and left Bitter at its default Thin and Merriweather at Light.
