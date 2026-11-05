@@ -501,6 +501,16 @@ enum class TrKey4 : uint8_t {
   WifiScreenOffColon,
   BookOptions,
   ColorPink,
+  SerialNumberColon,
+  SerialNumberUnassigned,
+  FactoryResetTitle,
+  FactoryResetKeepBooksOption,
+  FactoryResetWipeAllOption,
+  FactoryResetConfirmKeepQuestion,
+  FactoryResetConfirmWipeQuestion,
+  FactoryResetConfirmNoLabel,
+  FactoryResetConfirmYesLabel,
+  FactoryResetDone,
 };
 
 namespace Translations3 {

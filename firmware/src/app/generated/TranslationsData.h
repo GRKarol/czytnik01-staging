@@ -300,7 +300,7 @@ inline const char *trKey3Lookup(uint8_t keyIndex, uint8_t langIndex) {
 }
 
 inline const char *trKey4Lookup(uint8_t keyIndex, uint8_t langIndex) {
-  static const char *const kTable[183][6] = {
+  static const char *const kTable[193][6] = {
       {"Battery indicator: ", "Indicador de bater\xED""a: ", "Indicateur batterie : ", "Akkuanzeige: ", "Indicator baterie: ", "Wska\xB3""nik baterii: "},  // BatteryStyleColon
       {"Icon + %", "Icono + %", "Ic\xF4""ne + %", "Symbol + %", "Pictogram\x8B"" + %", "Ikona + %"},  // BatteryStyleIconPercent
       {"Number in icon", "N\xFA""mero en icono", "Chiffre dans l'ic\xF4""ne", "Zahl im Symbol", "Num\x8B""r \xEE""n pictogram\x8B""", "Liczba w ikonie"},  // BatteryStyleNumberInIcon
@@ -484,6 +484,16 @@ inline const char *trKey4Lookup(uint8_t keyIndex, uint8_t langIndex) {
       {"Wi-Fi with the screen off: ", "Wi-Fi con la pantalla apagada: ", "Wi-Fi \xE9""cran \xE9""teint : ", "WLAN bei aus. Bildschirm: ", "Wi-Fi cu ecranul stins: ", "Wi-Fi przy zgaszonym ekranie: "},  // WifiScreenOffColon
       {"Options", "Opciones", "Options", "Optionen", "Op\x8F""iuni", "Opcje"},  // BookOptions
       {"Pink", "Rosa", "Rose", "Rosa", "Roz", "R\xF3""\xB5""owy"},  // ColorPink
+      {"Serial number: ", "N\xFA""mero de serie: ", "Num\xE9""ro de s\xE9""rie : ", "Seriennummer: ", "Num\x8B""r de serie: ", "Numer seryjny: "},  // SerialNumberColon
+      {"unassigned", "sin asignar", "non attribu\xE9""", "nicht zugewiesen", "neatribuit", "nieprzypisany"},  // SerialNumberUnassigned
+      {"Factory reset", "Restablecer de f\xE1""brica", "R\xE9""initialisation d'usine", "Werkseinstellungen", "Resetare din fabric\x8B""", "Reset fabryczny"},  // FactoryResetTitle
+      {"Keep the books", "Conservar los libros", "Garder les livres", "B\xFC""cher behalten", "P\x8B""streaz\x8B"" c\x8B""r\x8F""ile", "Zachowaj ksi\x97""\xB5""ki"},  // FactoryResetKeepBooksOption
+      {"Delete everything (books too)", "Eliminar todo (tambi\xE9""n los libros)", "Supprimer tout (livres aussi)", "Alles l\xF6""schen (auch B\xFC""cher)", "\x8C""terge tot (\x8D""i c\x8B""r\x8F""ile)", "Usu\x9D"" wszystko (ksi\x97""\xB5""ki te\xB5"")"},  // FactoryResetWipeAllOption
+      {"Reset the settings? The books stay.", "\x17""Restablecer los ajustes? Los libros se quedan.", "R\xE9""initialiser les r\xE9""glages ? Les livres restent.", "Einstellungen zur\xFC""cksetzen? B\xFC""cher bleiben.", "Resetezi set\x8B""rile? C\x8B""r\x8F""ile r\x8B""m\xE2""n.", "Zresetowa\x9B"" ustawienia? Ksi\x97""\xB5""ki zostan\x97""."},  // FactoryResetConfirmKeepQuestion
+      {"Delete EVERYTHING, books included?", "\x17""Borrar TODO, libros incluidos?", "Tout supprimer, livres compris ?", "ALLES l\xF6""schen, B\xFC""cher inklusive?", "\x8C""tergi TOT, inclusiv c\x8B""r\x8F""ile?", "Usun\x97""\x9B"" WSZYSTKO, \x83""\x97""cznie z ksi\x97""\xB5""kami?"},  // FactoryResetConfirmWipeQuestion
+      {"No, cancel", "No, cancelar", "Non, annuler", "Nein, abbrechen", "Nu, anuleaz\x8B""", "Nie, anuluj"},  // FactoryResetConfirmNoLabel
+      {"Yes, reset", "S\xED"", restablecer", "Oui, r\xE9""initialiser", "Ja, zur\xFC""cksetzen", "Da, reseteaz\x8B""", "Tak, resetuj"},  // FactoryResetConfirmYesLabel
+      {"Reset done", "Restablecido", "R\xE9""initialis\xE9""", "Zur\xFC""ckgesetzt", "Resetat", "Zresetowano"},  // FactoryResetDone
   };
   return kTable[keyIndex][langIndex];
 }

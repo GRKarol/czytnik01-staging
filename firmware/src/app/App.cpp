@@ -377,10 +377,17 @@ enum UpdateConfirmItem : size_t {
   UpdateConfirmItemCount,
 };
 
+enum FactoryResetConfirmItem : size_t {
+  FactoryResetConfirmNo,
+  FactoryResetConfirmYes,
+  FactoryResetConfirmItemCount,
+};
+
 constexpr size_t kRestartConfirmHeaderRows = 1;
 constexpr size_t kTypographyResetConfirmHeaderRows = 1;
 constexpr size_t kSdCardRepairConfirmHeaderRows = 1;
 constexpr size_t kUpdateConfirmHeaderRows = 2;
+constexpr size_t kFactoryResetConfirmHeaderRows = 1;
 constexpr size_t kSettingsBackIndex = 0;
 // SettingsHome — nowy układ, ułożony pod codzienne użycie.
 // Indeksy 1–6 są zawsze widoczne; 7–9 tylko gdy `devModeEnabled()`
@@ -423,10 +430,17 @@ constexpr size_t kSettingsConnWifiScreenOffIndex = kSettingsConnWifiSessionIndex
 
 // SettingsAbout items
 constexpr size_t kSettingsAboutVersionIndex = 1;   // tap-target dla dev mode
-constexpr size_t kSettingsAboutBrandIndex = 2;
-constexpr size_t kSettingsAboutSdCardIndex = 3;    // SD card check (moved from main menu)
-constexpr size_t kSettingsAboutTutorialIndex = 4;  // restart tutorial
-constexpr size_t kSettingsAboutDevModeIndex = 5;   // pokazywane gdy dev mode
+constexpr size_t kSettingsAboutSerialIndex = 2;    // numer seryjny (read-only)
+constexpr size_t kSettingsAboutBrandIndex = 3;
+constexpr size_t kSettingsAboutSdCardIndex = 4;    // SD card check (moved from main menu)
+constexpr size_t kSettingsAboutTutorialIndex = 5;  // restart tutorial
+constexpr size_t kSettingsAboutDevModeIndex = 6;   // pokazywane gdy dev mode
+constexpr size_t kSettingsAboutFactoryResetIndex = 7;  // pokazywane gdy dev mode
+
+// FactoryReset — ekran wyboru wariantu (Back + 2 opcje), przed jedynym
+// potwierdzeniem (FactoryResetConfirm).
+constexpr size_t kFactoryResetKeepBooksIndex = 1;
+constexpr size_t kFactoryResetWipeAllIndex = 2;
 
 constexpr const char *kPrefSetupDone = "setup_done";
 // First-run wizard step the reader is on (WizardStep below); cleared when
@@ -527,6 +541,13 @@ constexpr size_t kChapterPickerFallbackIndex = 1;
 constexpr size_t kWifiNetworksBackIndex = 0;
 constexpr size_t kWifiNetworksFirstItemIndex = 1;
 constexpr const char *kPrefsNamespace = "rsvp";
+// Numer seryjny żyje w swojej własnej przestrzeni NVS, osobno od "rsvp": to
+// identyfikator urządzenia (jak S/N na obudowie telefonu), nie jego stan, więc
+// performFactoryReset() (który czyści "rsvp" do zera) nie ma do niej dostępu.
+// Zapisywany jednorazowo przy flashowaniu, komendą "prov serial <wartość>"
+// z web-flashera (app/AppProvision.inl).
+constexpr const char *kDeviceNvsNamespace = "device";
+constexpr const char *kPrefDeviceSerial = "serial";
 constexpr const char *kPrefBookPath = "book";
 constexpr const char *kPrefLegacyWordIndex = "word";
 constexpr const char *kPrefWpm = "wpm";
@@ -4108,6 +4129,7 @@ size_t *App::currentMenuSelectedIndexPtr(size_t &itemCountOut) {
       menuScreen_ == MenuScreen::SettingsConnectivity || menuScreen_ == MenuScreen::DeviceHome ||
       menuScreen_ == MenuScreen::NanoThemes ||
       menuScreen_ == MenuScreen::SettingsAbout || menuScreen_ == MenuScreen::ScreensaverSettings ||
+      menuScreen_ == MenuScreen::FactoryReset ||
       menuScreen_ == MenuScreen::WelcomeLanguage || menuScreen_ == MenuScreen::WelcomeTheme ||
       menuScreen_ == MenuScreen::WelcomeHighlightColor || menuScreen_ == MenuScreen::WelcomeReadingMode) {
     selectedIndex = &settingsSelectedIndex_;
@@ -4163,6 +4185,9 @@ size_t *App::currentMenuSelectedIndexPtr(size_t &itemCountOut) {
   } else if (menuScreen_ == MenuScreen::UpdateConfirm) {
     selectedIndex = &updateConfirmSelectedIndex_;
     itemCount = UpdateConfirmItemCount;
+  } else if (menuScreen_ == MenuScreen::FactoryResetConfirm) {
+    selectedIndex = &factoryResetConfirmSelectedIndex_;
+    itemCount = FactoryResetConfirmItemCount;
   } else if (isExtraScreen()) {
     selectedIndex = &extraSelectedIndex_;
     itemCount = 1;
@@ -5200,6 +5225,10 @@ void App::selectMenuItem(uint32_t nowMs) {
     selectUpdateConfirmItem(nowMs);
     return;
   }
+  if (menuScreen_ == MenuScreen::FactoryResetConfirm) {
+    selectFactoryResetConfirmItem(nowMs);
+    return;
+  }
 
   // When update button is shown, all menu indices shift by 1
   size_t effectiveIndex = menuSelectedIndex_;
@@ -5350,6 +5379,11 @@ void App::selectSettingsItem(uint32_t nowMs) {
 
   if (menuScreen_ == MenuScreen::SettingsAbout) {
     selectSettingsAboutItem(nowMs);
+    return;
+  }
+
+  if (menuScreen_ == MenuScreen::FactoryReset) {
+    selectFactoryResetItem(nowMs);
     return;
   }
 
@@ -6590,12 +6624,22 @@ void App::rebuildSettingsMenuItems() {
     settingsMenuItems_.push_back(uiText(UiText::Back));
     settingsMenuItems_.push_back(String(tr(TrKey::Version)) +
                                  otaUpdater_.currentVersion());
+    {
+      const String serial = deviceSerialNumber();
+      settingsMenuItems_.push_back(String(tr4(TrKey4::SerialNumberColon)) +
+                                   (serial.isEmpty() ? tr4(TrKey4::SerialNumberUnassigned) : serial));
+    }
     settingsMenuItems_.push_back(tr(TrKey::BrandLabel));
     settingsMenuItems_.push_back(tr2(TrKey2::SdCardCheck));
     settingsMenuItems_.push_back(tr3(TrKey3::TutorialLabel));
     if (devModeEnabled()) {
       settingsMenuItems_.push_back(tr(TrKey::DevModeOn));
+      settingsMenuItems_.push_back(tr4(TrKey4::FactoryResetTitle));
     }
+  } else if (menuScreen_ == MenuScreen::FactoryReset) {
+    settingsMenuItems_.push_back(uiText(UiText::Back));
+    settingsMenuItems_.push_back(tr4(TrKey4::FactoryResetKeepBooksOption));
+    settingsMenuItems_.push_back(tr4(TrKey4::FactoryResetWipeAllOption));
   } else if (menuScreen_ == MenuScreen::WelcomeLanguage) {
     // First-run wizard — krok 1/2. Lista języków po ich własnych nazwach
     // (te się nie tłumaczą — Polski to zawsze Polski, niezależnie od języka UI).
@@ -6786,6 +6830,16 @@ bool App::devModeEnabled() {
 
 String App::firmwareVersionLabel() const { return otaUpdater_.currentVersion(); }
 
+String App::deviceSerialNumber() const {
+  Preferences prefs;
+  if (!prefs.begin(kDeviceNvsNamespace, true)) {
+    return "";
+  }
+  const String serial = prefs.getString(kPrefDeviceSerial, "");
+  prefs.end();
+  return serial;
+}
+
 void App::setDevModeEnabled(bool enabled) {
   preferences_.putBool(kPrefDevMode, enabled);
   if (!enabled && navMode_ != NavMode::Modern) {
@@ -6808,6 +6862,7 @@ bool App::isSettingsListScreen() const {
          menuScreen_ == MenuScreen::DeviceHome ||
          menuScreen_ == MenuScreen::NanoThemes ||
          menuScreen_ == MenuScreen::SettingsAbout ||
+         menuScreen_ == MenuScreen::FactoryReset ||
          menuScreen_ == MenuScreen::ScreensaverSettings ||
          menuScreen_ == MenuScreen::WifiSettings ||
          menuScreen_ == MenuScreen::Presets ||
@@ -7062,10 +7117,104 @@ void App::selectSettingsAboutItem(uint32_t nowMs) {
       rebuildSettingsMenuItems();
       renderSettings();
       return;
+    case kSettingsAboutFactoryResetIndex:
+      if (devModeEnabled()) {
+        openFactoryReset();
+      }
+      return;
+    case kSettingsAboutSerialIndex:
     case kSettingsAboutBrandIndex:
     default:
       return;
   }
+}
+
+// ─── Factory reset ──────────────────────────────────────────────────────────
+// Dev-mode only (SettingsAbout, 10-tap na "Wersji" żeby odblokować — patrz
+// aboutTapCount_). Dwa kroki: wybór wariantu, potem jedno potwierdzenie.
+// Czyści przestrzeń NVS "rsvp" (ustawienia, pozycje, save pointy, hasło
+// Wi-Fi, setup_done — ten sam efekt co kablowy `esptool erase_region 0x9000
+// 0x5000`), nigdy przestrzeń "device" (numer seryjny — identyfikator
+// urządzenia, nie jego stan).
+
+void App::openFactoryReset() {
+  menuScreen_ = MenuScreen::FactoryReset;
+  settingsSelectedIndex_ = kSettingsBackIndex;
+  rebuildSettingsMenuItems();
+  renderSettings();
+}
+
+void App::selectFactoryResetItem(uint32_t nowMs) {
+  (void)nowMs;
+  switch (settingsSelectedIndex_) {
+    case kFactoryResetKeepBooksIndex:
+      openFactoryResetConfirm(true);
+      return;
+    case kFactoryResetWipeAllIndex:
+      openFactoryResetConfirm(false);
+      return;
+    case kSettingsBackIndex:
+    default:
+      openSettingsAbout();
+      return;
+  }
+}
+
+void App::openFactoryResetConfirm(bool keepBooks) {
+  factoryResetKeepBooks_ = keepBooks;
+  factoryResetConfirmSelectedIndex_ = FactoryResetConfirmNo;
+  menuScreen_ = MenuScreen::FactoryResetConfirm;
+  renderFactoryResetConfirm();
+}
+
+void App::selectFactoryResetConfirmItem(uint32_t nowMs) {
+  if (factoryResetConfirmSelectedIndex_ != FactoryResetConfirmYes) {
+    openFactoryReset();
+    return;
+  }
+  performFactoryReset(factoryResetKeepBooks_);
+  (void)nowMs;
+}
+
+void App::renderFactoryResetConfirm() {
+  std::vector<String> items;
+  items.reserve(FactoryResetConfirmItemCount + kFactoryResetConfirmHeaderRows);
+  items.push_back(factoryResetKeepBooks_ ? tr4(TrKey4::FactoryResetConfirmKeepQuestion)
+                                         : tr4(TrKey4::FactoryResetConfirmWipeQuestion));
+  items.push_back(tr4(TrKey4::FactoryResetConfirmNoLabel));
+  items.push_back(tr4(TrKey4::FactoryResetConfirmYesLabel));
+
+  renderItemGrid(items[0], items,
+                 factoryResetConfirmSelectedIndex_ + kFactoryResetConfirmHeaderRows,
+                 kFactoryResetConfirmHeaderRows);
+}
+
+void App::performFactoryReset(bool keepBooks) {
+  Serial.printf("[factory-reset] starting, keepBooks=%d\n", keepBooks ? 1 : 0);
+  display_.renderStatus(tr4(TrKey4::FactoryResetTitle), tr4(TrKey4::FactoryResetDone), "");
+
+  if (!keepBooks && storageReady_) {
+    activeBookStore_.close();
+    reader_.clearLoadedBook(millis());
+    while (storage_.bookCount() > 0) {
+      if (!storage_.deleteBook(0)) {
+        Serial.println("[factory-reset] deleteBook failed, stopping book wipe");
+        break;
+      }
+    }
+  }
+
+  // Ten sam zakres co kablowy reset (esptool erase_region 0x9000 0x5000) dla
+  // ustawień/stanu aplikacji -- numer seryjny leży w osobnej przestrzeni
+  // "device" i tego wywołania nie widzi.
+  preferences_.end();
+  Preferences wipePrefs;
+  wipePrefs.begin(kPrefsNamespace, false);
+  wipePrefs.clear();
+  wipePrefs.end();
+
+  delay(1200);
+  ESP.restart();
 }
 
 // ─── First-run welcome wizard ────────────────────────────────────────────────
@@ -12324,6 +12473,7 @@ void App::renderMenu() {
       menuScreen_ == MenuScreen::SettingsConnectivity || menuScreen_ == MenuScreen::DeviceHome ||
       menuScreen_ == MenuScreen::NanoThemes ||
       menuScreen_ == MenuScreen::SettingsAbout || menuScreen_ == MenuScreen::ScreensaverSettings ||
+      menuScreen_ == MenuScreen::FactoryReset ||
       menuScreen_ == MenuScreen::WelcomeLanguage ||
       menuScreen_ == MenuScreen::WelcomeTheme ||
       menuScreen_ == MenuScreen::WelcomeHighlightColor ||
@@ -12377,6 +12527,8 @@ void App::renderMenu() {
     renderSdCardRepairConfirm();
   } else if (menuScreen_ == MenuScreen::UpdateConfirm) {
     renderUpdateConfirm();
+  } else if (menuScreen_ == MenuScreen::FactoryResetConfirm) {
+    renderFactoryResetConfirm();
   } else if (menuScreen_ == MenuScreen::WelcomeSdCard) {
     renderWizardPage();
   } else if (menuScreen_ == MenuScreen::WelcomeConnect) {

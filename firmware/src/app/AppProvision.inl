@@ -12,6 +12,14 @@
 //                                    "@prov k <bytes so far>"; at the end
 //                                    @prov put ok|fail <reason>
 //   prov done                     -> @prov done fonts=<0|1>
+//   prov serial <value>           -> @prov serial ok <value>|fail <reason>
+//                                    Numer seryjny (np. "2026-001"), liczony
+//                                    i wysyłany przez stronę flashera z jej
+//                                    własnego licznika -- firmware tylko
+//                                    zapisuje to, co dostanie, do NVS
+//                                    "device" (kDeviceNvsNamespace w
+//                                    App.cpp), osobno od ustawień, więc
+//                                    reset fabryczny tego nie czyści.
 // Included at the end of App.cpp.
 
 namespace {
@@ -164,6 +172,24 @@ void App::handleProvisionCommand(const String &line) {
       SD_MMC.remove(partPath);
     }
     Serial.printf("\n@prov put %s %s\n", ok ? "ok" : "fail", reason);
+    return;
+  }
+
+  if (args.startsWith("serial ")) {
+    String serial = args.substring(7);
+    serial.trim();
+    if (serial.isEmpty() || serial.length() > 24) {
+      Serial.println("\n@prov serial fail syntax");
+      return;
+    }
+    Preferences devicePrefs;
+    if (!devicePrefs.begin(kDeviceNvsNamespace, false)) {
+      Serial.println("\n@prov serial fail nvs");
+      return;
+    }
+    devicePrefs.putString(kPrefDeviceSerial, serial);
+    devicePrefs.end();
+    Serial.printf("\n@prov serial ok %s\n", serial.c_str());
     return;
   }
 

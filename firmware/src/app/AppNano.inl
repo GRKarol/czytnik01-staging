@@ -310,6 +310,8 @@ App::NanoTab App::nanoActiveTab() const {
     case MenuScreen::SettingsAbout:
     case MenuScreen::SdCardRepairConfirm:
     case MenuScreen::UpdateConfirm:
+    case MenuScreen::FactoryReset:
+    case MenuScreen::FactoryResetConfirm:
       return NanoTab::Device;
     case MenuScreen::PluginsHome:
     case MenuScreen::PluginsActive:
@@ -339,6 +341,8 @@ String App::nanoScreenTitle() const {
       return tr(TrKey::Connectivity);
     case MenuScreen::SettingsAbout:
       return tr(TrKey::AboutHelp);
+    case MenuScreen::FactoryReset:
+      return tr4(TrKey4::FactoryResetTitle);
     case MenuScreen::Presets:
       return tr3(TrKey3::PresetsLabel);
     case MenuScreen::PluginsActive:
@@ -444,6 +448,7 @@ void App::renderNanoScreen(const String &title, const std::vector<String> &items
     case MenuScreen::TypographyResetConfirm:
     case MenuScreen::SdCardRepairConfirm:
     case MenuScreen::UpdateConfirm:
+    case MenuScreen::FactoryResetConfirm:
     case MenuScreen::BookDeleteConfirm:
     case MenuScreen::SavePointDeleteConfirm:
     case MenuScreen::PresetsDeleteConfirm:

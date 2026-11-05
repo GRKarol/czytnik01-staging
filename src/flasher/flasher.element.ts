@@ -1,7 +1,7 @@
 import { LitElement, css, html, svg } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { APP_URL, BRAND_NAME, FIRMWARE_MANIFEST_URL, FLASHER_URL } from "../shared/config";
-import { setUpCard, type CardSetupProgress } from "./card-setup";
+import { setUpCard, suggestNextSerialNumber, type CardSetupProgress } from "./card-setup";
 
 const iconFlower = (s = 80) => svg`
   <svg width=${s} height=${s} viewBox="0 0 100 100" aria-hidden="true">
@@ -25,14 +25,23 @@ export class CzytnikFlasher extends LitElement {
   @state() private card: CardSetupProgress | null = null;
   @state() private cardError = "";
   @state() private cardBusy = false;
+  // Numer seryjny do przypisania tej sztuce -- pre-wypełniony propozycją z
+  // licznika w localStorage, edytowalny (np. żeby pominąć uszkodzoną sztukę
+  // przy flashowaniu wielu czytników pod rząd). Puste pole = nie przypisuj.
+  @state() private serialInput = suggestNextSerialNumber();
 
   private async prepareCard() {
     this.cardError = "";
     this.cardBusy = true;
     try {
-      await setUpCard(FLASHER_URL, (progress) => {
-        this.card = progress;
-      });
+      await setUpCard(
+        FLASHER_URL,
+        (progress) => {
+          this.card = progress;
+        },
+        this.serialInput,
+      );
+      this.serialInput = suggestNextSerialNumber();
     } catch (error) {
       const message = (error as Error).message || String(error);
       // Closing the port picker is not an error worth a red box.
@@ -56,8 +65,14 @@ export class CzytnikFlasher extends LitElement {
         return "Formatuję kartę...";
       case "fonts":
         return `Wgrywam czcionki: ${card.filesDone}/${card.filesTotal} (${mb(card.bytesDone)} z ${mb(card.bytesTotal)} MB)`;
-      case "done":
-        return "Gotowe. Karta ma wszystkie czcionki, kreator na czytniku pominie ich pobieranie.";
+      case "serial":
+        return "Zapisuję numer seryjny...";
+      case "done": {
+        const base = "Gotowe. Karta ma wszystkie czcionki, kreator na czytniku pominie ich pobieranie.";
+        if (card.serialAssigned) return `${base} Numer seryjny: ${card.serialAssigned}.`;
+        if (card.serialError) return `${base} Numeru seryjnego nie udało się zapisać (${card.serialError}).`;
+        return base;
+      }
     }
   }
 
@@ -110,6 +125,16 @@ export class CzytnikFlasher extends LitElement {
             kartę i wgra na nią wszystkie czcionki (około 9 MB, kilkadziesiąt sekund).
           </p>
           <p class="warning">Formatowanie usuwa wszystko, co jest na karcie.</p>
+          <label class="serial-field">
+            Numer seryjny tej sztuki (puste pole = nie przypisuj)
+            <input
+              type="text"
+              placeholder="np. 2026-001"
+              .value=${this.serialInput}
+              ?disabled=${this.cardBusy}
+              @input=${(e: InputEvent) => (this.serialInput = (e.target as HTMLInputElement).value)}
+            />
+          </label>
           <button
             class="cta"
             ?disabled=${this.cardBusy || !this.serialSupported}
@@ -304,6 +329,24 @@ export class CzytnikFlasher extends LitElement {
     .cta[disabled] {
       opacity: 0.6;
       cursor: progress;
+    }
+
+    .serial-field {
+      display: block;
+      margin-top: 14px;
+      color: var(--ink-soft);
+      font-size: 0.86rem;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+    }
+    .serial-field input {
+      display: block;
+      margin-top: 6px;
+      width: 160px;
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font: 600 0.95rem/1 ui-monospace, SFMono-Regular, monospace;
+      color: var(--ink);
     }
 
     .progress {

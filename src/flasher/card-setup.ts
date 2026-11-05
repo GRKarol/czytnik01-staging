@@ -18,12 +18,64 @@ export interface FontFile {
 }
 
 export interface CardSetupProgress {
-  phase: "connect" | "wake" | "format" | "fonts" | "done";
+  phase: "connect" | "wake" | "format" | "fonts" | "serial" | "done";
   filesDone: number;
   filesTotal: number;
   bytesDone: number;
   bytesTotal: number;
   file?: string;
+  // Set once the "serial" phase resolves (ok or not) -- best-effort, never
+  // fails the whole card set-up on its own (fonts/card are what matters for
+  // the wizard; the serial number just rides along at the end of the same
+  // USB session so the batch-flashing session doesn't need a second step).
+  serialAssigned?: string;
+  serialError?: string;
+}
+
+// Numer seryjny do przypisania przy flashowaniu wielu czytników pod rząd
+// (format RRRR-NNN). Licznik żyje w localStorage tej przeglądarki -- każdy
+// kolejny "Przygotuj kartę" na tym komputerze proponuje następny numer, a
+// nowy rok zeruje licznik. Karol może go nadpisać w polu przed wysłaniem
+// (np. żeby pominąć numer uszkodzonej sztuki).
+const SERIAL_COUNTER_KEY = "flowerSerialCounter";
+
+interface SerialCounterState {
+  year: number;
+  seq: number;
+}
+
+function readSerialCounter(): SerialCounterState {
+  try {
+    const raw = window.localStorage.getItem(SERIAL_COUNTER_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as SerialCounterState;
+      if (typeof parsed.year === "number" && typeof parsed.seq === "number") return parsed;
+    }
+  } catch {
+    /* localStorage unavailable or garbage -- start fresh */
+  }
+  return { year: new Date().getFullYear(), seq: 0 };
+}
+
+export function suggestNextSerialNumber(): string {
+  const stored = readSerialCounter();
+  const year = new Date().getFullYear();
+  const seq = stored.year === year ? stored.seq + 1 : 1;
+  return `${year}-${String(seq).padStart(3, "0")}`;
+}
+
+// Called only after the firmware confirms the serial it was actually sent
+// (which may be a manually edited value, not the suggestion) -- the next
+// suggestion continues from there.
+export function rememberAssignedSerial(serial: string): void {
+  const match = /^(\d{4})-(\d{3})$/.exec(serial);
+  if (!match) return;
+  const state: SerialCounterState = { year: Number(match[1]), seq: Number(match[2]) };
+  try {
+    window.localStorage.setItem(SERIAL_COUNTER_KEY, JSON.stringify(state));
+  } catch {
+    /* localStorage unavailable -- next suggestion just repeats this one */
+  }
 }
 
 type Waiter = {
@@ -191,6 +243,7 @@ async function putFile(
 export async function setUpCard(
   baseUrl: string,
   onProgress: (progress: CardSetupProgress) => void,
+  serial?: string,
 ): Promise<void> {
   const files = await loadFontList(baseUrl);
   const bytesTotal = files.reduce((sum, f) => sum + f.size, 0);
@@ -259,7 +312,26 @@ export async function setUpCard(
     if (!answer.includes("fonts=1")) {
       throw new Error("Czytnik nie widzi wszystkich czcionek na karcie. Spróbuj jeszcze raz.");
     }
-    onProgress({ ...progress, phase: "done" });
+
+    const result: CardSetupProgress = { ...progress, phase: "done" };
+    const trimmedSerial = serial?.trim();
+    if (trimmedSerial) {
+      onProgress({ ...progress, phase: "serial" });
+      try {
+        const serialReply = link.waitFor((m) => m.startsWith("serial "));
+        await link.send(`prov serial ${trimmedSerial}`);
+        const reply = await serialReply;
+        if (reply === `serial ok ${trimmedSerial}`) {
+          result.serialAssigned = trimmedSerial;
+          rememberAssignedSerial(trimmedSerial);
+        } else {
+          result.serialError = reply;
+        }
+      } catch (error) {
+        result.serialError = (error as Error).message || String(error);
+      }
+    }
+    onProgress(result);
   } finally {
     await link.close();
   }

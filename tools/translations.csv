@@ -659,3 +659,13 @@ TrKey4.PacingSentences;Kropki;Full stops;Puntos;Points;Satzende;Puncte
 TrKey4.WifiScreenOffColon;Wi-Fi przy zgaszonym ekranie: ;Wi-Fi with the screen off: ;Wi-Fi con la pantalla apagada: ;Wi-Fi écran éteint : ;WLAN bei aus. Bildschirm: ;Wi-Fi cu ecranul stins: 
 TrKey4.BookOptions;Opcje;Options;Opciones;Options;Optionen;Opțiuni
 TrKey4.ColorPink;Różowy;Pink;Rosa;Rose;Rosa;Roz
+TrKey4.SerialNumberColon;Numer seryjny: ;Serial number: ;Número de serie: ;Numéro de série : ;Seriennummer: ;Număr de serie: 
+TrKey4.SerialNumberUnassigned;nieprzypisany;unassigned;sin asignar;non attribué;nicht zugewiesen;neatribuit
+TrKey4.FactoryResetTitle;Reset fabryczny;Factory reset;Restablecer de fábrica;Réinitialisation d'usine;Werkseinstellungen;Resetare din fabrică
+TrKey4.FactoryResetKeepBooksOption;Zachowaj książki;Keep the books;Conservar los libros;Garder les livres;Bücher behalten;Păstrează cărțile
+TrKey4.FactoryResetWipeAllOption;Usuń wszystko (książki też);Delete everything (books too);Eliminar todo (también los libros);Supprimer tout (livres aussi);Alles löschen (auch Bücher);Șterge tot (și cărțile)
+TrKey4.FactoryResetConfirmKeepQuestion;Zresetować ustawienia? Książki zostaną.;Reset the settings? The books stay.;¿Restablecer los ajustes? Los libros se quedan.;Réinitialiser les réglages ? Les livres restent.;Einstellungen zurücksetzen? Bücher bleiben.;Resetezi setările? Cărțile rămân.
+TrKey4.FactoryResetConfirmWipeQuestion;Usunąć WSZYSTKO, łącznie z książkami?;Delete EVERYTHING, books included?;¿Borrar TODO, libros incluidos?;Tout supprimer, livres compris ?;ALLES löschen, Bücher inklusive?;Ștergi TOT, inclusiv cărțile?
+TrKey4.FactoryResetConfirmNoLabel;Nie, anuluj;No, cancel;No, cancelar;Non, annuler;Nein, abbrechen;Nu, anulează
+TrKey4.FactoryResetConfirmYesLabel;Tak, resetuj;Yes, reset;Sí, restablecer;Oui, réinitialiser;Ja, zurücksetzen;Da, resetează
+TrKey4.FactoryResetDone;Zresetowano;Reset done;Restablecido;Réinitialisé;Zurückgesetzt;Resetat

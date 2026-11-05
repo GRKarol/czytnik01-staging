@@ -158,6 +158,8 @@ class App {
     TypographyValueEditor,
     SdCardRepairConfirm,
     UpdateConfirm,
+    FactoryReset,
+    FactoryResetConfirm,
     WelcomeLanguage,
     WelcomeSdCard,
     WelcomeTheme,
@@ -485,6 +487,13 @@ class App {
   /// Używane przez BleApi do odpowiedzi na `get-version`.
   String firmwareVersionLabel() const;
 
+  /// Numer seryjny urządzenia (format RRRR-NNN, np. "2026-001"), zapisany
+  /// osobno od ustawień ("device" NVS namespace) przy flashowaniu przez
+  /// prov serial <wartość> (app/AppProvision.inl) -- tak przeżywa reset
+  /// fabryczny. Puste jeśli jeszcze nieprzypisany (karta nie przeszła przez
+  /// tę komendę web-flashera).
+  String deviceSerialNumber() const;
+
   /// Zwraca true dla każdego ekranu który renderuje się jako list-menu
   /// settings (display_.renderMenu z settingsMenuItems_). Touch handlery
   /// i nawigacja musi traktować je wszystkie tak samo — bez tego helpera
@@ -521,6 +530,19 @@ class App {
   void selectSettingsConnectivityItem(uint32_t nowMs);
   void openSettingsAbout();
   void selectSettingsAboutItem(uint32_t nowMs);
+
+  /// Reset fabryczny (dev-mode only, w SettingsAbout): ekran wyboru
+  /// "zachowaj książki" / "usuń wszystko", potem jedno potwierdzenie
+  /// (FactoryResetConfirm) i restart. Czyści przestrzeń NVS "rsvp" (te same
+  /// ustawienia/stan co kabel-reset 0x9000-0x5000), ale nie dotyka
+  /// przestrzeni "device" (numer seryjny przechowany tam z założenia
+  /// przeżywa każdy reset — to identyfikator urządzenia, nie jego stan).
+  void openFactoryReset();
+  void selectFactoryResetItem(uint32_t nowMs);
+  void openFactoryResetConfirm(bool keepBooks);
+  void selectFactoryResetConfirmItem(uint32_t nowMs);
+  void renderFactoryResetConfirm();
+  void performFactoryReset(bool keepBooks);
 
   /// First-run welcome wizard — pyta o język, motyw, Wi-Fi, czcionkę i tryb
   /// czytania zanim klient zobaczy główne menu. Pokazywany tylko jeśli
@@ -1384,6 +1406,10 @@ class App {
   size_t typographyResetConfirmSelectedIndex_ = 0;
   size_t sdCardRepairConfirmSelectedIndex_ = 0;
   size_t updateConfirmSelectedIndex_ = 0;
+  size_t factoryResetConfirmSelectedIndex_ = 0;
+  // Which variant was picked on FactoryReset before landing on the one
+  // confirm step that actually performs it.
+  bool factoryResetKeepBooks_ = true;
   uint8_t brightnessLevelIndex_ = 4;
   uint8_t brightnessPercentSetting_ = 100;
   uint8_t readerFontSizeIndex_ = 1;  // 0 large, 1 medium (default), 2 small
